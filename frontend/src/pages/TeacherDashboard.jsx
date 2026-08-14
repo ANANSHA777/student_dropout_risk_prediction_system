@@ -65,7 +65,7 @@ const TeacherDashboard = () => {
     setIsRecordModalOpen(true);
   };
 
-  // Save Academic Record ONLY (Risk evaluation remains untouched)
+  // Save Academic Record ONLY
   const handleSaveRecord = async (studentId, recordData) => {
     try {
       await updateStudentAcademicRecord(studentId, recordData);
@@ -76,14 +76,20 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Trigger AI Risk Evaluation (Called ONLY when clicking AI Evaluate button)
+  // Trigger AI Risk Evaluation (Updates database record and reloads data)
   const handleEvaluateRisk = async (studentId) => {
     setEvaluatingStudentId(studentId);
     setError(null);
     try {
-      await triggerStudentRiskEvaluation(studentId);
+      const result = await triggerStudentRiskEvaluation(studentId);
       await loadData();
-      showFeedback('AI risk level evaluation updated successfully.');
+      
+      const cat = result?.riskCategory || result?.data?.riskCategory;
+      if (cat && cat !== 'None') {
+        showFeedback(`AI Risk Evaluation completed: ${result?.riskLevel || ''} Risk (${cat}).`);
+      } else {
+        showFeedback('AI risk level evaluation updated successfully.');
+      }
     } catch (err) {
       setError(`AI Evaluation Error: ${err.message}`);
     } finally {

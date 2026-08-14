@@ -14,7 +14,6 @@ import {
   UserCheck,
   Heart,
   DollarSign,
-  Gamepad2,
   Brain,
 } from 'lucide-react';
 import { changePassword } from '../services/authService';
@@ -23,6 +22,9 @@ import ChangePasswordModal from '../components/ChangePasswordModal';
 export default function StudentDashboard() {
   const { logout } = useAuth();
   const [profile, setProfile] = useState(null);
+
+  // Toggle state to switch between summary view and edit form view
+  const [isEditingSurvey, setIsEditingSurvey] = useState(false);
 
   // Updated Structured Survey State
   const [survey, setSurvey] = useState({
@@ -60,7 +62,13 @@ export default function StudentDashboard() {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       const data = await res.json();
-      if (data.success) setProfile(data.profile);
+      if (data.success) {
+        setProfile(data.profile);
+        // Sync local survey state with saved database values if available
+        if (data.profile.surveyData) {
+          setSurvey((prev) => ({ ...prev, ...data.profile.surveyData }));
+        }
+      }
     } catch (err) {
       console.error('Error loading profile:', err);
     }
@@ -115,6 +123,7 @@ export default function StudentDashboard() {
       const data = await res.json();
       if (data.success) {
         setStatusMsg('Self-assessment survey submitted successfully!');
+        setIsEditingSurvey(false); // Switch back to summary card
         fetchProfile();
       }
     } catch (err) {
@@ -270,214 +279,263 @@ export default function StudentDashboard() {
             </div>
           )}
 
-          <form onSubmit={handleSurveySubmit} className="space-y-6">
-            
-            {/* 1. FINANCIAL & LOGISTICAL FACTORS */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                <DollarSign size={14} /> Financial & Logistical Indicators
-              </h3>
+          {/* COMPACT SUMMARY VIEW WHEN SURVEY IS COMPLETED & NOT EDITING */}
+          {profile.surveyCompleted && !isEditingSurvey ? (
+            <div className="bg-slate-950 border border-slate-800/80 rounded-lg p-5 space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-800/60 pb-3">
+                <div className="text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 size={15} /> Your response has been recorded.
+                </div>
+                <button
+                  onClick={() => setIsEditingSurvey(true)}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold underline cursor-pointer"
+                >
+                  Update Response
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <span className="text-slate-500 block">Money & Fee Worries</span>
+                  <span className="text-slate-200 font-medium">{survey.financialStress}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Commute Time</span>
+                  <span className="text-slate-200 font-medium">{survey.commuteTime}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Sleep Hours</span>
+                  <span className="text-slate-200 font-medium">{survey.sleepHoursPerNight}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Mental Health State</span>
+                  <span className="text-slate-200 font-medium">{survey.mentalHealthStatus}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* INPUT FORM VIEW WHEN PENDING OR EDITING */
+            <form onSubmit={handleSurveySubmit} className="space-y-6">
               
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Family Monthly Income (₹)</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.familyIncome}
-                    onChange={(e) => setSurvey({ ...survey, familyIncome: e.target.value })}
-                  >
-                    <option value="< 15,000">Below ₹15,000</option>
-                    <option value="15,000 - 30,000">₹15,000 - ₹30,000</option>
-                    <option value="30,000 - 60,000">₹30,000 - ₹60,000</option>
-                    <option value="> 60,000">Above ₹60,000</option>
-                  </select>
-                </div>
+              {/* 1. FINANCIAL & LOGISTICAL FACTORS */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                  <DollarSign size={14} /> Financial & Logistical Indicators
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Family Monthly Income (₹)</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.familyIncome}
+                      onChange={(e) => setSurvey({ ...survey, familyIncome: e.target.value })}
+                    >
+                      <option value="< 15,000">Below ₹15,000</option>
+                      <option value="15,000 - 30,000">₹15,000 - ₹30,000</option>
+                      <option value="30,000 - 60,000">₹30,000 - ₹60,000</option>
+                      <option value="> 60,000">Above ₹60,000</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Money & Fee Worries</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.financialStress}
-                    onChange={(e) => setSurvey({ ...survey, financialStress: e.target.value })}
-                  >
-                    <option value="Low">Low (No issue)</option>
-                    <option value="Moderate">Moderate (Manageable)</option>
-                    <option value="High">High (Severe burden)</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Money & Fee Worries</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.financialStress}
+                      onChange={(e) => setSurvey({ ...survey, financialStress: e.target.value })}
+                    >
+                      <option value="Low">Low (No issue)</option>
+                      <option value="Moderate">Moderate (Manageable)</option>
+                      <option value="High">High (Severe burden)</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Living Situation</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.livingSituation}
-                    onChange={(e) => setSurvey({ ...survey, livingSituation: e.target.value })}
-                  >
-                    <option value="With Family">With Family</option>
-                    <option value="Campus Hostel">Campus Hostel</option>
-                    <option value="Rented PG / Flat">Rented PG / Flat</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Living Situation</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.livingSituation}
+                      onChange={(e) => setSurvey({ ...survey, livingSituation: e.target.value })}
+                    >
+                      <option value="With Family">With Family</option>
+                      <option value="Campus Hostel">Campus Hostel</option>
+                      <option value="Rented PG / Flat">Rented PG / Flat</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Part-Time Work / Job</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.partTimeJob}
-                    onChange={(e) => setSurvey({ ...survey, partTimeJob: e.target.value })}
-                  >
-                    <option value="No">No Job</option>
-                    <option value="Yes (< 20 hrs/wk)">Yes (&lt; 20 hrs/week)</option>
-                    <option value="Yes (> 20 hrs/wk)">Yes (&gt; 20 hrs/week)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. ACADEMIC & DAILY ROUTINE */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                <BookOpen size={14} /> Academic Load & Daily Schedule
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Daily Self-Study Hours</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.studyHoursPerDay}
-                    onChange={(e) => setSurvey({ ...survey, studyHoursPerDay: e.target.value })}
-                  >
-                    <option value="< 1 hr">Less than 1 hour</option>
-                    <option value="1-2 hrs">1 - 2 hours</option>
-                    <option value="3-5 hrs">3 - 5 hours</option>
-                    <option value="> 5 hrs">More than 5 hours</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Daily Commute Time</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.commuteTime}
-                    onChange={(e) => setSurvey({ ...survey, commuteTime: e.target.value })}
-                  >
-                    <option value="< 30 mins">Less than 30 mins</option>
-                    <option value="30-60 mins">30 - 60 mins</option>
-                    <option value="1-2 hrs">1 - 2 hours</option>
-                    <option value="> 2 hrs">More than 2 hours</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Active Backlogs / Failed Papers</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.activeBacklogs}
-                    onChange={(e) => setSurvey({ ...survey, activeBacklogs: e.target.value })}
-                  >
-                    <option value="0">0 Backlogs</option>
-                    <option value="1-2">1 - 2 Backlogs</option>
-                    <option value="3-4">3 - 4 Backlogs</option>
-                    <option value="> 4">More than 4 Backlogs</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. HEALTH, SLEEP & BEHAVIORAL FACTORS */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                <Heart size={14} /> Wellness & Behavior
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Nightly Sleep Hours</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.sleepHoursPerNight}
-                    onChange={(e) => setSurvey({ ...survey, sleepHoursPerNight: e.target.value })}
-                  >
-                    <option value="< 5 hrs">Less than 5 hours</option>
-                    <option value="5-6 hrs">5 - 6 hours</option>
-                    <option value="7-8 hrs">7 - 8 hours</option>
-                    <option value="> 8 hrs">More than 8 hours</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Mental Health & Emotional State</label>
-                  <select
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    value={survey.mentalHealthStatus}
-                    onChange={(e) => setSurvey({ ...survey, mentalHealthStatus: e.target.value })}
-                  >
-                    <option value="Good">Good / Balanced</option>
-                    <option value="Anxious">Anxious / Stressed</option>
-                    <option value="Depressed">Low Mood / Feeling Down</option>
-                    <option value="Burned Out">Completely Burned Out</option>
-                  </select>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Part-Time Work / Job</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.partTimeJob}
+                      onChange={(e) => setSurvey({ ...survey, partTimeJob: e.target.value })}
+                    >
+                      <option value="No">No Job</option>
+                      <option value="Yes (< 20 hrs/wk)">Yes (&lt; 20 hrs/week)</option>
+                      <option value="Yes (> 20 hrs/wk)">Yes (&gt; 20 hrs/week)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              {/* Addictions / Behavioral Checkboxes */}
-              <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-lg mt-3">
-                <label className="text-xs text-slate-400 block mb-2 font-medium">
-                  Select any factors that impact your daily study routine:
-                </label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={survey.addictions.socialMedia}
-                      onChange={() => handleCheckboxChange('socialMedia')}
-                      className="accent-indigo-500 rounded"
-                    />
-                    Excessive Social Media
-                  </label>
+              {/* 2. ACADEMIC & DAILY ROUTINE */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                  <BookOpen size={14} /> Academic Load & Daily Schedule
+                </h3>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={survey.addictions.gaming}
-                      onChange={() => handleCheckboxChange('gaming')}
-                      className="accent-indigo-500 rounded"
-                    />
-                    Excessive Gaming
-                  </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Daily Self-Study Hours</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.studyHoursPerDay}
+                      onChange={(e) => setSurvey({ ...survey, studyHoursPerDay: e.target.value })}
+                    >
+                      <option value="< 1 hr">Less than 1 hour</option>
+                      <option value="1-2 hrs">1 - 2 hours</option>
+                      <option value="3-5 hrs">3 - 5 hours</option>
+                      <option value="> 5 hrs">More than 5 hours</option>
+                    </select>
+                  </div>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={survey.addictions.substances}
-                      onChange={() => handleCheckboxChange('substances')}
-                      className="accent-indigo-500 rounded"
-                    />
-                    Substance / Alcohol Use
-                  </label>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Daily Commute Time</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.commuteTime}
+                      onChange={(e) => setSurvey({ ...survey, commuteTime: e.target.value })}
+                    >
+                      <option value="< 30 mins">Less than 30 mins</option>
+                      <option value="30-60 mins">30 - 60 mins</option>
+                      <option value="1-2 hrs">1 - 2 hours</option>
+                      <option value="> 2 hrs">More than 2 hours</option>
+                    </select>
+                  </div>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={survey.addictions.none}
-                      onChange={() => handleCheckboxChange('none')}
-                      className="accent-indigo-500 rounded"
-                    />
-                    None of the Above
-                  </label>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Active Backlogs / Failed Papers</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.activeBacklogs}
+                      onChange={(e) => setSurvey({ ...survey, activeBacklogs: e.target.value })}
+                    >
+                      <option value="0">0 Backlogs</option>
+                      <option value="1-2">1 - 2 Backlogs</option>
+                      <option value="3-4">3 - 4 Backlogs</option>
+                      <option value="> 4">More than 4 Backlogs</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={submittingSurvey}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer disabled:opacity-50 shadow-lg shadow-indigo-600/20"
-            >
-              <Send size={14} /> {submittingSurvey ? 'Submitting...' : 'Submit Self-Assessment Update'}
-            </button>
-          </form>
+              {/* 3. HEALTH, SLEEP & BEHAVIORAL FACTORS */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                  <Heart size={14} /> Wellness & Behavior
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Nightly Sleep Hours</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.sleepHoursPerNight}
+                      onChange={(e) => setSurvey({ ...survey, sleepHoursPerNight: e.target.value })}
+                    >
+                      <option value="< 5 hrs">Less than 5 hours</option>
+                      <option value="5-6 hrs">5 - 6 hours</option>
+                      <option value="7-8 hrs">7 - 8 hours</option>
+                      <option value="> 8 hrs">More than 8 hours</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Mental Health & Emotional State</label>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={survey.mentalHealthStatus}
+                      onChange={(e) => setSurvey({ ...survey, mentalHealthStatus: e.target.value })}
+                    >
+                      <option value="Good">Good / Balanced</option>
+                      <option value="Anxious">Anxious / Stressed</option>
+                      <option value="Depressed">Low Mood / Feeling Down</option>
+                      <option value="Burned Out">Completely Burned Out</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Addictions / Behavioral Checkboxes */}
+                <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-lg mt-3">
+                  <label className="text-xs text-slate-400 block mb-2 font-medium">
+                    Select any factors that impact your daily study routine:
+                  </label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={survey.addictions.socialMedia}
+                        onChange={() => handleCheckboxChange('socialMedia')}
+                        className="accent-indigo-500 rounded"
+                      />
+                      Excessive Social Media
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={survey.addictions.gaming}
+                        onChange={() => handleCheckboxChange('gaming')}
+                        className="accent-indigo-500 rounded"
+                      />
+                      Excessive Gaming
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={survey.addictions.substances}
+                        onChange={() => handleCheckboxChange('substances')}
+                        className="accent-indigo-500 rounded"
+                      />
+                      Substance / Alcohol Use
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={survey.addictions.none}
+                        onChange={() => handleCheckboxChange('none')}
+                        className="accent-indigo-500 rounded"
+                      />
+                      None of the Above
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={submittingSurvey}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer disabled:opacity-50 shadow-lg shadow-indigo-600/20"
+                >
+                  <Send size={14} /> {submittingSurvey ? 'Submitting...' : 'Submit Self-Assessment Update'}
+                </button>
+
+                {isEditingSurvey && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingSurvey(false)}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-semibold transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
         </div>
 
         {/* Change Password Modal */}

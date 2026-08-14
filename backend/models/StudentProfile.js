@@ -12,7 +12,6 @@ const studentProfileSchema = new mongoose.Schema(
     studentId: {
       type: String,
       default: '',
-      // Note: Removed unique: true to prevent E11000 duplicate key errors on missing or empty string IDs
     },
     department: {
       type: String,
@@ -35,10 +34,25 @@ const studentProfileSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+
+    // --- STUDENT SELF-ASSESSMENT & SURVEY DATA ---
     surveyCompleted: {
       type: Boolean,
       default: false, // Tracks student survey completion status
     },
+    surveyData: {
+      familyMonthlyIncome: { type: String, default: '' },
+      moneyFeeWorries: { type: String, default: '' },
+      livingSituation: { type: String, default: '' },
+      partTimeWork: { type: String, default: '' },
+      dailySelfStudyHours: { type: String, default: '' },
+      dailyCommuteTime: { type: String, default: '' },
+      activeBacklogs: { type: String, default: '' },
+      nightlySleepHours: { type: String, default: '' },
+      mentalHealthState: { type: String, default: '' },
+      impactFactors: [{ type: String }],
+    },
+
     assignmentsSubmitted: {
       type: Number,
       default: 0,
@@ -75,7 +89,11 @@ const studentProfileSchema = new mongoose.Schema(
       },
     ],
 
-    // AI Diagnostic & Classification Fields
+    // --- AI DIAGNOSTIC & CLASSIFICATION FIELDS ---
+    riskEvaluated: {
+      type: Boolean,
+      default: false, // Explicitly tracks if AI evaluation was performed
+    },
     riskScore: {
       type: Number,
       default: 0,
@@ -84,13 +102,17 @@ const studentProfileSchema = new mongoose.Schema(
       type: String,
       default: null, // Default null ensures new/unevaluated students display "Not Evaluated"
     },
+    riskCategory: {
+      type: String,
+      default: 'None', // Stores categories like "Wellness & Mental Health", "Financial Burden", "Academic Concern", etc.
+    },
     primaryRiskCategory: {
       type: String,
-      enum: ['ACADEMIC', 'ATTENDANCE', 'FINANCIAL', 'PERSONAL', 'NONE'],
+      enum: ['ACADEMIC', 'ATTENDANCE', 'FINANCIAL', 'PERSONAL', 'WELLNESS', 'NONE'],
       default: 'NONE',
     },
 
-    // Automated Action Flags triggered by AI Category/Level
+    // --- AUTOMATED ACTION FLAGS ---
     recommendedActions: {
       enableRemedialQuiz: {
         type: Boolean,

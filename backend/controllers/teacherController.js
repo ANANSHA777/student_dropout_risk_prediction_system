@@ -1,4 +1,3 @@
-// backend/controllers/teacherController.js
 const User = require('../models/User');
 const StudentProfile = require('../models/StudentProfile');
 
@@ -198,7 +197,6 @@ exports.updateStudentMarks = async (req, res) => {
       updateQuery.$push = pushPayload;
     }
 
-    // setDefaultsOnInsert: false prevents Mongoose from overriding null fields with schema defaults
     const profile = await StudentProfile.findOneAndUpdate(
       { user: user._id },
       updateQuery,
@@ -224,21 +222,20 @@ exports.updateStudentMarks = async (req, res) => {
   }
 };
 
-// @desc    Trigger AI Risk Evaluation for a Student (Manual Action Only)
+// @desc    Trigger Weighted AI Risk Evaluation for a Student
 // @route   POST /api/teacher/risk/evaluate
 // @access  Private (Teacher, Admin)
 exports.evaluateStudentRisk = async (req, res) => {
   try {
-    const { studentId } = req.body;
-    const targetId = studentId || req.body.id;
+    const targetId = req.params.studentId || req.params.id || req.body.studentId || req.body.id;
 
     if (!targetId) {
-      return res.status(400).json({ success: false, message: 'Student ID is required' });
+      return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
 
-    const isObjectId = targetId.match(/^[0-9a-fA-F]{24}$/);
+    const isObjectId = Boolean(targetId.match(/^[0-9a-fA-F]{24}$/));
 
-    // 1. Fetch Student Profile and User
+    // 1. Fetch Student Profile and User Document
     let profile = await StudentProfile.findOne(
       isObjectId ? { $or: [{ user: targetId }, { _id: targetId }] } : { studentId: targetId }
     );
@@ -246,7 +243,7 @@ exports.evaluateStudentRisk = async (req, res) => {
     let user = await User.findById(isObjectId ? targetId : profile?.user);
 
     if (!user && !profile) {
-      return res.status(404).json({ success: false, message: 'Student record not found' });
+      return res.status(404).json({ success: false, message: 'Student record not found.' });
     }
 
     if (!profile) {
@@ -258,31 +255,106 @@ exports.evaluateStudentRisk = async (req, res) => {
       });
     }
 
-    // 2. Perform Risk Level Assessment logic
-    const currentCgpa = profile.cgpa ?? user.cgpa ?? 0;
-    const currentAttendance = profile.attendancePercentage ?? profile.attendance ?? user.attendance ?? 0;
+    // 2. Extract metrics with safe defaults
+    const cgpa = Number(profile.cgpa ?? user?.cgpa ?? 0);
+    const attendance = Number(profile.attendancePercentage ?? profile.attendance ?? user?.attendance ?? 0);
+    const backlogs = String(profile.activeBacklogs || '0');
 
-    let calculatedRisk = 'Low';
-    if (currentCgpa < 5.0 || currentAttendance < 60) {
-      calculatedRisk = 'High';
-    } else if (currentCgpa < 6.5 || currentAttendance < 75) {
-      calculatedRisk = 'Medium';
+    // Extract survey metrics
+    const financialStress = profile.financialStress || 'Low';
+    const mentalHealth = profile.mentalHealthSelfReport || profile.mentalHealthStatus || 'Good';
+    const addictions = profile.addictions || {};
+
+    // Weighted risk scores
+    let academicRiskPoints = 0;
+    let financialRiskPoints = 0;
+    let wellnessRiskPoints = 0;
+
+    // A. ACADEMIC EVALUATION
+    if (cgpa > 0 && cgpa < 5.0) academicRiskPoints += 3;
+    else if (cgpa >= 5.0 && cgpa < 6.5) academicRiskPoints += 2;
+    else if (cgpa >= 6.5 && cgpa < 7.5) academicRiskPoints += 1;
+
+    if (attendance < 60) academicRiskPoints += 3;
+    else if (attendance >= 60 && attendance < 75) academicRiskPoints += 2;
+    else if (attendance >= 75 && attendance < 85) academicRiskPoints += 1;
+
+    if (backlogs === '> 4' || backlogs === '3-4') academicRiskPoints += 3;
+    else if (backlogs === '1-2') academicRiskPoints += 1.5;
+
+    // B. FINANCIAL EVALUATION
+    if (financialStress === 'High') financialRiskPoints += 3;
+    else if (financialStress === 'Moderate') financialRiskPoints += 1;
+
+    if (profile.familyIncome === '< 15,000' && financialStress !== 'Low') {
+      financialRiskPoints += 1;
     }
 
-    // 3. Save evaluated risk to both documents
-    profile.riskLevel = calculatedRisk;
-    if (user) user.riskLevel = calculatedRisk;
+    // C. WELLNESS & LIFESTYLE EVALUATION
+    if (mentalHealth === 'Burned Out' || mentalHealth === 'Depressed') wellnessRiskPoints += 3;
+    else if (mentalHealth === 'Anxious') wellnessRiskPoints += 2;
+
+    if (addictions.substances) wellnessRiskPoints += 3;
+    if (addictions.gaming || addictions.socialMedia) wellnessRiskPoints += 1;
+
+    if (profile.sleepHoursPerNight === '< 5 hrs') wellnessRiskPoints += 1;
+
+    // 3. TOTAL RISK SCORE & CATEGORY ASSIGNMENT
+    const totalRiskScore = academicRiskPoints + financialRiskPoints + wellnessRiskPoints;
+
+    let calculatedRiskLevel = 'Low';
+    if (totalRiskScore >= 5 || academicRiskPoints >= 5 || wellnessRiskPoints >= 4) {
+      calculatedRiskLevel = 'High';
+    } else if (totalRiskScore >= 2.5) {
+      calculatedRiskLevel = 'Medium';
+    }
+
+    // Primary Risk Category Identification
+    let primaryRiskCategory = 'None';
+    if (calculatedRiskLevel !== 'Low') {
+      const highestPoints = Math.max(academicRiskPoints, financialRiskPoints, wellnessRiskPoints);
+
+      if (highestPoints === academicRiskPoints) {
+        primaryRiskCategory = 'Academic Concern';
+      } else if (highestPoints === financialRiskPoints) {
+        primaryRiskCategory = 'Financial Burden';
+      } else if (highestPoints === wellnessRiskPoints) {
+        primaryRiskCategory = 'Wellness & Mental Health';
+      }
+    }
+
+    // 4. Save updated risk evaluations to both documents
+    profile.riskLevel = calculatedRiskLevel;
+    profile.riskCategory = primaryRiskCategory;
+    profile.riskEvaluated = true;
+    profile.lastEvaluatedAt = new Date();
+
+    if (user) {
+      user.riskLevel = calculatedRiskLevel;
+      await user.save();
+    }
 
     await profile.save();
-    if (user) await user.save();
 
     return res.status(200).json({
       success: true,
-      message: 'AI Risk evaluation completed successfully',
-      riskLevel: calculatedRisk,
+      message: 'AI Risk Evaluation calculated successfully.',
+      riskLevel: calculatedRiskLevel,
+      riskCategory: primaryRiskCategory,
       student: {
         _id: user?._id || profile.user,
-        riskLevel: calculatedRisk,
+        riskLevel: calculatedRiskLevel,
+        riskCategory: primaryRiskCategory,
+      },
+      evaluation: {
+        riskLevel: calculatedRiskLevel,
+        riskCategory: primaryRiskCategory,
+        totalRiskScore,
+        breakdown: {
+          academicRiskPoints,
+          financialRiskPoints,
+          wellnessRiskPoints,
+        },
       },
     });
   } catch (error) {

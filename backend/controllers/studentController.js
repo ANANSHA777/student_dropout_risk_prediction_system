@@ -1,4 +1,4 @@
-const User = require('../models/User'); // Adjust path to models
+const User = require('../models/User'); // Adjust path to models if needed
 const StudentProfile = require('../models/StudentProfile');
 
 // @desc    Get current student's academic profile and risk indicators
@@ -17,10 +17,10 @@ exports.getStudentProfile = async (req, res) => {
       return res.status(200).json({
         success: true,
         profile: {
-          name: user.name,
-          email: user.email,
-          attendancePercentage: 0,
-          latestMarks: 0,
+          name: user ? user.name : req.user.name,
+          email: user ? user.email : req.user.email,
+          attendancePercentage: null,
+          cgpa: null,
           surveyCompleted: false,
           surveyStatus: 'Pending',
           riskLevel: 'Unevaluated',
@@ -36,6 +36,8 @@ exports.getStudentProfile = async (req, res) => {
         name: req.user.name,
         email: req.user.email,
         ...profile,
+        // Ensure surveyStatus string aligns with surveyCompleted boolean
+        surveyStatus: profile.surveyCompleted ? 'Completed' : 'Pending',
       },
     });
   } catch (error) {
@@ -53,9 +55,70 @@ exports.getStudentProfile = async (req, res) => {
 exports.submitStudentSurvey = async (req, res) => {
   try {
     const studentId = req.user._id;
-    
-    // Destructure all incoming survey data from req.body
-    const {
+
+    // Support both naming conventions from frontend payload
+    const familyIncome = req.body.familyIncome || req.body.familyMonthlyIncome || '';
+    const financialStress = req.body.financialStress || req.body.moneyFeeWorries || '';
+    const livingSituation = req.body.livingSituation || '';
+    const commuteTime = req.body.commuteTime || req.body.dailyCommuteTime || '';
+    const partTimeJob = req.body.partTimeJob || req.body.partTimeWork || '';
+    const activeBacklogs = req.body.activeBacklogs || '';
+    const studyHoursPerDay = req.body.studyHoursPerDay || req.body.dailySelfStudyHours || '';
+    const sleepHoursPerNight = req.body.sleepHoursPerNight || req.body.nightlySleepHours || '';
+    const mentalHealthStatus = req.body.mentalHealthStatus || req.body.mentalHealthState || '';
+    const addictions = req.body.addictions || req.body.impactFactors || [];
+
+    // --- FLEXIBLE RISK EVALUATION RULES ---
+    let suggestedRiskCategory = 'None';
+    let primaryCategoryEnum = 'NONE';
+    let suggestedRiskLevel = 'Medium Risk'; // Default risk elevation for poor indicators
+
+    const mentalHealthLower = mentalHealthStatus.toLowerCase();
+    const financialLower = financialStress.toLowerCase();
+
+    // Rule 1: Mental Health / Emotional Distress -> Trigger Counselor Category
+    if (
+      mentalHealthLower.includes('anxious') ||
+      mentalHealthLower.includes('stress') ||
+      mentalHealthLower.includes('overwhelmed') ||
+      mentalHealthLower.includes('depressed') ||
+      mentalHealthLower.includes('poor')
+    ) {
+      suggestedRiskCategory = 'Wellness & Mental Health';
+      primaryCategoryEnum = 'WELLNESS';
+    } 
+    // Rule 2: High Financial Burden -> Trigger Financial / Counselor Category
+    else if (
+      financialLower.includes('high') ||
+      financialLower.includes('severe') ||
+      financialLower.includes('burden') ||
+      financialLower.includes('emergency')
+    ) {
+      suggestedRiskCategory = 'Financial Burden';
+      primaryCategoryEnum = 'FINANCIAL';
+    }
+
+    // Structured nested survey object for schema persistence
+    const surveyDataObject = {
+      familyMonthlyIncome: familyIncome,
+      moneyFeeWorries: financialStress,
+      livingSituation,
+      partTimeWork: partTimeJob,
+      dailySelfStudyHours: studyHoursPerDay,
+      dailyCommuteTime: commuteTime,
+      activeBacklogs,
+      nightlySleepHours: sleepHoursPerNight,
+      mentalHealthState: mentalHealthStatus,
+      impactFactors: Array.isArray(addictions) ? addictions : [addictions].filter(Boolean),
+    };
+
+    // Prepare profile update payload
+    const updateData = {
+      surveyCompleted: true,
+      surveyStatus: 'Completed',
+      lastSurveySubmittedAt: new Date(),
+
+      // Flat Survey Fields (For direct query access)
       familyIncome,
       financialStress,
       livingSituation,
@@ -64,39 +127,29 @@ exports.submitStudentSurvey = async (req, res) => {
       activeBacklogs,
       studyHoursPerDay,
       sleepHoursPerNight,
-      mentalHealthStatus,
+      mentalHealthSelfReport: mentalHealthStatus,
       addictions,
-    } = req.body;
 
-    // Map high financial or wellness stress to elevated risk categories
-    let suggestedRiskCategory = 'None';
-    if (financialStress === 'High') suggestedRiskCategory = 'Financial / Personal Concern';
+      // Nested survey object (For StudentProfile schema mapping)
+      surveyData: surveyDataObject,
+    };
+
+    // If wellness or financial flags were detected, update risk category & recommendation flags
+    if (suggestedRiskCategory !== 'None') {
+      updateData.riskCategory = suggestedRiskCategory;
+      updateData.primaryRiskCategory = primaryCategoryEnum;
+      
+      // Upgrade risk level if currently unassigned or low
+      updateData.riskLevel = 'Medium';
+      
+      // Auto-flag for counselor escalation
+      updateData['recommendedActions.escalateToCounselor'] = true;
+    }
 
     const updatedProfile = await StudentProfile.findOneAndUpdate(
       { user: studentId },
-      {
-        $set: {
-          // --- CRITICAL FIXES FOR TEACHER PORTAL STATUS ---
-          surveyCompleted: true,            // Marks survey as done (Boolean)
-          surveyStatus: 'Completed',         // Marks status string for UI checks
-          
-          // --- DETAILED SURVEY DATA ---
-          familyIncome,
-          financialStress,
-          livingSituation,
-          commuteTime,
-          partTimeJob,
-          activeBacklogs,
-          studyHoursPerDay,
-          sleepHoursPerNight,
-          mentalHealthSelfReport: mentalHealthStatus,
-          addictions,
-          lastSurveySubmittedAt: new Date(),
-
-          ...(suggestedRiskCategory !== 'None' && { riskCategory: suggestedRiskCategory }),
-        },
-      },
-      { new: true, upsert: true }
+      { $set: updateData },
+      { new: true, upsert: true, runValidators: false }
     );
 
     res.status(200).json({
@@ -105,6 +158,7 @@ exports.submitStudentSurvey = async (req, res) => {
       profile: updatedProfile,
     });
   } catch (error) {
+    console.error('Error in submitStudentSurvey:', error);
     res.status(500).json({
       success: false,
       message: 'Server error submitting self-assessment',
