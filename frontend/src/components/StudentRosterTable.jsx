@@ -12,6 +12,8 @@ import {
   HeartPulse,
   DollarSign,
   AlertTriangle,
+  MessageSquare,
+  ShieldCheck,
 } from 'lucide-react';
 
 export default function StudentRosterTable({
@@ -36,7 +38,9 @@ export default function StudentRosterTable({
               <th className="p-4">CGPA / Attendance</th>
               <th className="p-4">Survey Status</th>
               <th className="p-4">Risk Evaluation</th>
-              <th className="p-4">Recommended Intervention</th>
+              <th className="p-4">
+                {showActions ? 'Recommended Intervention' : 'Actions / Interventions Logged'}
+              </th>
               {showActions && <th className="p-4 text-right">Actions</th>}
             </tr>
           </thead>
@@ -112,6 +116,10 @@ export default function StudentRosterTable({
                   categoryLower.includes('academic') ||
                   (cgpaVal !== null && cgpaVal < 6.5) ||
                   (attendanceVal !== null && attendanceVal < 75);
+
+                // Extract comments/actions for Admin read-only mode
+                const actionComment = student.actionTaken || student.interventionStatus || student.notes || student.comment;
+                const assignedCounselor = student.assignedCounselor || student.counselor;
 
                 // Helper for tooltip explanations
                 const getEvaluateTooltip = () => {
@@ -202,51 +210,80 @@ export default function StudentRosterTable({
                       )}
                     </td>
 
-                    {/* Recommended Interventions */}
+                    {/* Recommended Interventions / Read-Only Comments */}
                     <td className="p-4">
-                      {isRiskEvaluated ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {/* Assign Counselor Button: Displays if Personal/Wellness category OR if manually assigned */}
-                          {(isPersonalOrWellnessRisk || (!isAcademicRisk && student.riskLevel !== 'Low')) && (
-                            <button
-                              onClick={() =>
-                                onAssignCounselor
-                                  ? onAssignCounselor(student)
-                                  : alert(`Assigned student ${student.name} to Psychological Counselor`)
-                              }
-                              className="px-2.5 py-1 bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-sm"
-                              title="Refer Student to Guidance & Psychological Counseling"
-                            >
-                              <UserCheck size={12} /> Assign Counselor
-                            </button>
-                          )}
+                      {showActions ? (
+                        /* TEACHER / COUNSELOR VIEW: INTERACTIVE BUTTONS */
+                        isRiskEvaluated ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {/* Assign Counselor Button */}
+                            {(isPersonalOrWellnessRisk || (!isAcademicRisk && student.riskLevel !== 'Low')) && (
+                              <button
+                                onClick={() =>
+                                  onAssignCounselor
+                                    ? onAssignCounselor(student)
+                                    : alert(`Assigned student ${student.name} to Psychological Counselor`)
+                                }
+                                className="px-2.5 py-1 bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-sm"
+                                title="Refer Student to Guidance & Psychological Counseling"
+                              >
+                                <UserCheck size={12} /> Assign Counselor
+                              </button>
+                            )}
 
-                          {/* Academic Plan Button */}
-                          {isAcademicRisk && (
-                            <button
-                              onClick={() =>
-                                onAcademicIntervention
-                                  ? onAcademicIntervention(student)
-                                  : alert(`Initiated Academic Support Plan for ${student.name}`)
-                              }
-                              className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-sm"
-                              title="Schedule Remedial / Academic Support Plan"
-                            >
-                              <BookOpen size={12} /> Academic Plan
-                            </button>
-                          )}
+                            {/* Academic Plan Button */}
+                            {isAcademicRisk && (
+                              <button
+                                onClick={() =>
+                                  onAcademicIntervention
+                                    ? onAcademicIntervention(student)
+                                    : alert(`Initiated Academic Support Plan for ${student.name}`)
+                                }
+                                className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-sm"
+                                title="Schedule Remedial / Academic Support Plan"
+                              >
+                                <BookOpen size={12} /> Academic Plan
+                              </button>
+                            )}
 
-                          {/* Fallback if low risk and no concerns */}
-                          {!isAcademicRisk && !isPersonalOrWellnessRisk && (
-                            <span className="text-xs text-emerald-400 font-medium">No action needed</span>
+                            {/* Fallback if low risk */}
+                            {!isAcademicRisk && !isPersonalOrWellnessRisk && (
+                              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                                <ShieldCheck size={13} /> No action needed
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-500 italic">Pending prerequisite data</span>
+                        )
+                      ) : (
+                        /* ADMIN VIEW: READ-ONLY TEXT AND STATUS BADGES (NO BUTTONS) */
+                        <div className="space-y-1">
+                          {actionComment ? (
+                            <div className="flex items-start gap-1.5 text-xs text-slate-300 bg-slate-950/40 p-2 rounded-lg border border-slate-800">
+                              <MessageSquare size={13} className="text-indigo-400 shrink-0 mt-0.5" />
+                              <span className="leading-tight">{actionComment}</span>
+                            </div>
+                          ) : assignedCounselor ? (
+                            <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-500/10 border border-purple-500/20 px-2.5 py-1 rounded-md">
+                              <UserCheck size={12} />
+                              Assigned to {assignedCounselor}
+                            </div>
+                          ) : isRiskEvaluated && student.riskLevel === 'Low' ? (
+                            <span className="text-xs text-emerald-400/80 font-medium flex items-center gap-1">
+                              <ShieldCheck size={13} /> Clear / No Intervention Required
+                            </span>
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 italic">
+                              <Clock size={12} />
+                              No intervention logged / Pending action
+                            </div>
                           )}
                         </div>
-                      ) : (
-                        <span className="text-xs text-slate-500 italic">Pending prerequisite data</span>
                       )}
                     </td>
 
-                    {/* Actions */}
+                    {/* Actions Column (Hidden for Admin when showActions={false}) */}
                     {showActions && (
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-2">
