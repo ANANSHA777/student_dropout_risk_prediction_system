@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LogIn, Mail, Lock, AlertCircle, ArrowRight, UserCheck } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, ArrowRight, UserCheck, ArrowLeft } from 'lucide-react';
 
 const Login = () => {
   const [role, setRole] = useState('teacher');
@@ -12,6 +12,16 @@ const Login = () => {
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Automatically sync state with ?role= query parameter from Landing Page
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const roleParam = params.get('role');
+    if (roleParam && ['teacher', 'counselor', 'admin', 'student'].includes(roleParam.toLowerCase())) {
+      setRole(roleParam.toLowerCase());
+    }
+  }, [location]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -19,7 +29,7 @@ const Login = () => {
     setLoading(true);
 
     try {
-      // Pass email, password, and the selected role to your auth service/context
+      // Pass email, password, and the selected role to auth context
       const userData = await login(email, password, role);
       
       // Fallback to state role if backend doesn't explicitly return role field
@@ -50,7 +60,16 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4 relative">
+      
+      {/* Back to Home Link */}
+      <Link 
+        to="/" 
+        className="absolute top-6 left-6 text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-2 transition"
+      >
+        <ArrowLeft size={16} /> Back to Home
+      </Link>
+
       <div className="w-full max-w-md bg-slate-800/90 border border-slate-700/80 rounded-2xl shadow-2xl p-8 backdrop-blur-sm">
         
         {/* Header */}

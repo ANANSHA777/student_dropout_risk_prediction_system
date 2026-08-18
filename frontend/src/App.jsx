@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
+import LandingPage from './pages/LandingPage';
 import Login from './pages/auth/Login';
 import RegisterPage from './pages/RegisterPage';
 import AdminDashboard from './pages/AdminDashboard';
@@ -17,6 +18,7 @@ function App() {
       <Router>
         <Routes>
           {/* Public Route */}
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<RegisterPage />} />
           {/* Protected Routes by Role */}
@@ -37,7 +39,8 @@ function App() {
           </Route>
 
           {/* Catch-all Fallback */}
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          
+          <Route path="*" element={<LandingPage />} />
         </Routes>
       </Router>
     </AuthProvider>

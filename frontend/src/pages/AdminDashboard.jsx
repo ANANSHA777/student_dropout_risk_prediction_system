@@ -1,5 +1,5 @@
 // src/pages/AdminDashboard.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   ShieldCheck,
@@ -99,6 +99,52 @@ export default function AdminDashboard() {
       loadStudentAnalytics();
     }
   }, [viewMode, selectedDept, selectedYear]);
+
+  /**
+   * Helper: Aggregates student roster metrics if backend analytics omit departments
+   * with 0 High-Risk students (e.g. Architecture, Business).
+   */
+  const mergedAnalytics = useMemo(() => {
+    const copy = JSON.parse(JSON.stringify(analytics || {}));
+
+    if (students && students.length > 0) {
+      students.forEach((student) => {
+        const dept = student.department || 'Unassigned';
+        const year = student.year || student.yearOfStudy || 'General';
+
+        if (!copy[dept]) {
+          copy[dept] = {};
+        }
+
+        if (!copy[dept][year]) {
+          copy[dept][year] = {
+            total: 0,
+            highRisk: 0,
+            mediumRisk: 0,
+            lowRisk: 0,
+            unevaluated: 0,
+          };
+        }
+
+        // If backend analytics did not include this student count already
+        // calculate from live roster
+        const risk = (student.riskLevel || student.risk || '').toLowerCase();
+        const currentStats = copy[dept][year];
+
+        // Ensure totals are not zero when student records exist
+        if (currentStats.total === 0) {
+          if (risk === 'high') currentStats.highRisk += 1;
+          else if (risk === 'medium' || risk === 'moderate') currentStats.mediumRisk += 1;
+          else if (risk === 'low' || risk === 'safe') currentStats.lowRisk += 1;
+          else currentStats.unevaluated += 1;
+
+          currentStats.total += 1;
+        }
+      });
+    }
+
+    return copy;
+  }, [analytics, students]);
 
   const showFeedback = (msg) => {
     setActionFeedback(msg);
@@ -322,7 +368,7 @@ export default function AdminDashboard() {
         {viewMode === 'analytics' && (
           <div className="space-y-8">
             {/* VISUAL RISK ANALYTICS CHARTS */}
-            <RiskAnalyticsCharts analytics={analytics} />
+            <RiskAnalyticsCharts analytics={mergedAnalytics} />
 
             {/* OVERALL RISK MATRIX (BY DEPARTMENT & YEAR) */}
             <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
@@ -345,23 +391,23 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800 text-sm">
-                    {Object.keys(analytics).length === 0 ? (
+                    {Object.keys(mergedAnalytics).length === 0 ? (
                       <tr>
                         <td colSpan="7" className="p-6 text-center text-slate-500 italic">
                           No risk analytics data available.
                         </td>
                       </tr>
                     ) : (
-                      Object.entries(analytics).flatMap(([dept, years]) =>
+                      Object.entries(mergedAnalytics).flatMap(([dept, years]) =>
                         Object.entries(years).map(([year, stats]) => (
                           <tr key={`${dept}-${year}`} className="hover:bg-slate-800/40 transition">
                             <td className="p-3 font-semibold text-slate-200">{dept}</td>
                             <td className="p-3 text-indigo-400 font-medium">{year}</td>
-                            <td className="p-3 font-bold text-white">{stats.total}</td>
-                            <td className="p-3 text-red-400 font-semibold">{stats.highRisk}</td>
-                            <td className="p-3 text-amber-400 font-semibold">{stats.mediumRisk}</td>
-                            <td className="p-3 text-emerald-400 font-semibold">{stats.lowRisk}</td>
-                            <td className="p-3 text-slate-400">{stats.unevaluated}</td>
+                            <td className="p-3 font-bold text-white">{stats.total ?? 0}</td>
+                            <td className="p-3 text-red-400 font-semibold">{stats.highRisk ?? 0}</td>
+                            <td className="p-3 text-amber-400 font-semibold">{stats.mediumRisk ?? 0}</td>
+                            <td className="p-3 text-emerald-400 font-semibold">{stats.lowRisk ?? 0}</td>
+                            <td className="p-3 text-slate-400">{stats.unevaluated ?? 0}</td>
                           </tr>
                         ))
                       )
