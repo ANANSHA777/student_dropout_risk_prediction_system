@@ -26,7 +26,7 @@ export default function StudentDashboard() {
   // Toggle state to switch between summary view and edit form view
   const [isEditingSurvey, setIsEditingSurvey] = useState(false);
 
-  // Updated Structured Survey State
+  // Structured Survey State with clean default initializers
   const [survey, setSurvey] = useState({
     familyIncome: '< 15,000',
     financialStress: 'Low',
@@ -56,18 +56,70 @@ export default function StudentDashboard() {
     fetchProfile();
   }, []);
 
+  /**
+   * Translates string arrays or object states into clean boolean map for form checkboxes
+   */
+  const parseImpactFactorsToBooleans = (rawFactors) => {
+    const result = {
+      socialMedia: false,
+      gaming: false,
+      substances: false,
+      none: true,
+    };
+
+    if (!rawFactors) return result;
+
+    if (Array.isArray(rawFactors)) {
+      rawFactors.forEach((factor) => {
+        const lower = String(factor).toLowerCase();
+        if (lower.includes('social media')) result.socialMedia = true;
+        if (lower.includes('gaming')) result.gaming = true;
+        if (lower.includes('substance') || lower.includes('alcohol')) result.substances = true;
+      });
+    } else if (typeof rawFactors === 'object') {
+      result.socialMedia = Boolean(rawFactors.socialMedia);
+      result.gaming = Boolean(rawFactors.gaming);
+      result.substances = Boolean(rawFactors.substances);
+    }
+
+    result.none = !result.socialMedia && !result.gaming && !result.substances;
+    return result;
+  };
+
   const fetchProfile = async () => {
     try {
       const res = await fetch('/api/student/profile', {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       const data = await res.json();
-      if (data.success) {
+
+      if (data.success && data.profile) {
         setProfile(data.profile);
-        // Sync local survey state with saved database values if available
-        if (data.profile.surveyData) {
-          setSurvey((prev) => ({ ...prev, ...data.profile.surveyData }));
-        }
+
+        // Normalize survey data payload safely from backend
+        const sData = data.profile.surveyData || {};
+        const pData = data.profile;
+
+        const rawFactors =
+          sData.impactFactors ||
+          pData.addictions ||
+          sData.addictions ||
+          pData.impactFactors;
+
+        const parsedAddictions = parseImpactFactorsToBooleans(rawFactors);
+
+        setSurvey({
+          familyIncome: sData.familyMonthlyIncome || pData.familyIncome || '< 15,000',
+          financialStress: sData.moneyFeeWorries || pData.financialStress || 'Low',
+          livingSituation: sData.livingSituation || pData.livingSituation || 'With Family',
+          commuteTime: sData.dailyCommuteTime || pData.commuteTime || '< 30 mins',
+          partTimeJob: sData.partTimeWork || pData.partTimeJob || 'No',
+          activeBacklogs: sData.activeBacklogs || pData.activeBacklogs || '0',
+          studyHoursPerDay: sData.dailySelfStudyHours || pData.studyHoursPerDay || '3-5 hrs',
+          sleepHoursPerNight: sData.nightlySleepHours || pData.sleepHoursPerNight || '7-8 hrs',
+          mentalHealthStatus: sData.mentalHealthState || pData.mentalHealthSelfReport || 'Good',
+          addictions: parsedAddictions,
+        });
       }
     } catch (err) {
       console.error('Error loading profile:', err);
@@ -111,6 +163,8 @@ export default function StudentDashboard() {
   const handleSurveySubmit = async (e) => {
     e.preventDefault();
     setSubmittingSurvey(true);
+    setStatusMsg('');
+
     try {
       const res = await fetch('/api/student/survey', {
         method: 'POST',
@@ -120,14 +174,19 @@ export default function StudentDashboard() {
         },
         body: JSON.stringify(survey),
       });
+
       const data = await res.json();
+
       if (data.success) {
         setStatusMsg('Self-assessment survey submitted successfully!');
         setIsEditingSurvey(false); // Switch back to summary card
-        fetchProfile();
+        await fetchProfile(); // Refetch profile to synchronize latest state
+      } else {
+        setStatusMsg(data.message || 'Error submitting survey. Please try again.');
       }
     } catch (err) {
-      setStatusMsg('Error submitting survey. Please try again.');
+      console.error('Submit Error:', err);
+      setStatusMsg('Error submitting survey. Please check server logs.');
     } finally {
       setSubmittingSurvey(false);
     }
@@ -146,7 +205,7 @@ export default function StudentDashboard() {
           <div>
             <h1 className="text-2xl font-bold text-white">Welcome back, {profile.name || 'Student'}</h1>
             <p className="text-xs text-slate-400 mt-1">
-              Student ID: <span className="text-slate-300 font-medium">{profile.studentId}</span> | Dept: <span className="text-slate-300 font-medium">{profile.department}</span>
+              Student ID: <span className="text-slate-300 font-medium">{profile.studentId || profile.user || 'N/A'}</span> | Dept: <span className="text-slate-300 font-medium">{profile.department || 'General'}</span>
             </p>
           </div>
 

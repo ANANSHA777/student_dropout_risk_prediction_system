@@ -1,12 +1,65 @@
+const mongoose = require('mongoose');
 const User = require('../models/User'); // Adjust path to models if needed
 const StudentProfile = require('../models/StudentProfile');
+
+/**
+ * Helper to safely normalize and parse impact factors/addictions into a string array.
+ * Prevents Mongoose CastError when objects or stringified JSON are received from the frontend.
+ */
+const normalizeImpactFactors = (rawFactors) => {
+  if (!rawFactors) return ['None of the Above'];
+
+  let parsed = rawFactors;
+
+  // Handle case where frontend passes a stringified JSON array/object
+  if (typeof rawFactors === 'string') {
+    try {
+      const trimmed = rawFactors.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        parsed = JSON.parse(trimmed);
+      } else {
+        return [trimmed];
+      }
+    } catch (e) {
+      return [rawFactors];
+    }
+  }
+
+  const cleanFactors = [];
+
+  // Handle Array input
+  if (Array.isArray(parsed)) {
+    parsed.forEach((item) => {
+      if (typeof item === 'string') {
+        cleanFactors.push(item);
+      } else if (typeof item === 'object' && item !== null) {
+        if (item.socialMedia) cleanFactors.push('Excessive Social Media');
+        if (item.gaming) cleanFactors.push('Excessive Gaming');
+        if (item.substances) cleanFactors.push('Substance / Alcohol Use');
+        if (item.none) cleanFactors.push('None of the Above');
+      }
+    });
+  } 
+  // Handle Object input
+  else if (typeof parsed === 'object' && parsed !== null) {
+    if (parsed.socialMedia) cleanFactors.push('Excessive Social Media');
+    if (parsed.gaming) cleanFactors.push('Excessive Gaming');
+    if (parsed.substances) cleanFactors.push('Substance / Alcohol Use');
+    if (parsed.none) cleanFactors.push('None of the Above');
+  }
+
+  return cleanFactors.length > 0 ? cleanFactors : ['None of the Above'];
+};
 
 // @desc    Get current student's academic profile and risk indicators
 // @route   GET /api/student/profile
 // @access  Private (Student)
 exports.getStudentProfile = async (req, res) => {
   try {
-    const studentId = req.user._id;
+    const rawUserId = req.user._id || req.user.id;
+    const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
+      ? new mongoose.Types.ObjectId(rawUserId)
+      : rawUserId;
 
     // Fetch student profile document populated with user details
     let profile = await StudentProfile.findOne({ user: studentId }).lean();
@@ -26,21 +79,48 @@ exports.getStudentProfile = async (req, res) => {
           riskLevel: 'Unevaluated',
           riskCategory: 'None',
           aiRecommendations: ['Maintain regular class attendance.'],
+          surveyData: {},
         },
       });
     }
 
+    // Safely extract nested surveyData object
+    const sData = profile.surveyData || {};
+
+    // Reconstruct normalized survey values with fallbacks across flat and nested schemas
+    const normalizedSurveyData = {
+      familyMonthlyIncome: sData.familyMonthlyIncome || profile.familyIncome || '',
+      moneyFeeWorries: sData.moneyFeeWorries || profile.financialStress || '',
+      livingSituation: sData.livingSituation || profile.livingSituation || '',
+      partTimeWork: sData.partTimeWork || profile.partTimeJob || '',
+      dailySelfStudyHours: sData.dailySelfStudyHours || profile.studyHoursPerDay || '',
+      dailyCommuteTime: sData.dailyCommuteTime || profile.commuteTime || '',
+      activeBacklogs: sData.activeBacklogs || profile.activeBacklogs || '',
+      nightlySleepHours: sData.nightlySleepHours || profile.sleepHoursPerNight || '',
+      mentalHealthState: sData.mentalHealthState || profile.mentalHealthSelfReport || '',
+      impactFactors: (sData.impactFactors && sData.impactFactors.length > 0)
+        ? sData.impactFactors
+        : (profile.addictions && profile.addictions.length > 0)
+        ? profile.addictions
+        : ['None of the Above'],
+    };
+
     res.status(200).json({
       success: true,
       profile: {
+        ...profile,
         name: req.user.name,
         email: req.user.email,
-        ...profile,
-        // Ensure surveyStatus string aligns with surveyCompleted boolean
         surveyStatus: profile.surveyCompleted ? 'Completed' : 'Pending',
+        // Guarantees all UI forms can read top-level AND nested fields reliably
+        financialStress: profile.financialStress || normalizedSurveyData.moneyFeeWorries,
+        mentalHealthStatus: profile.mentalHealthSelfReport || normalizedSurveyData.mentalHealthState,
+        studyHoursPerDay: profile.studyHoursPerDay || normalizedSurveyData.dailySelfStudyHours,
+        surveyData: normalizedSurveyData,
       },
     });
   } catch (error) {
+    console.error('Error in getStudentProfile:', error);
     res.status(500).json({
       success: false,
       message: 'Server error fetching student profile',
@@ -54,24 +134,31 @@ exports.getStudentProfile = async (req, res) => {
 // @access  Private (Student)
 exports.submitStudentSurvey = async (req, res) => {
   try {
-    const studentId = req.user._id;
+    const rawUserId = req.user._id || req.user.id;
+    const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
+      ? new mongoose.Types.ObjectId(rawUserId)
+      : rawUserId;
 
-    // Support both naming conventions from frontend payload
-    const familyIncome = req.body.familyIncome || req.body.familyMonthlyIncome || '';
-    const financialStress = req.body.financialStress || req.body.moneyFeeWorries || '';
-    const livingSituation = req.body.livingSituation || '';
-    const commuteTime = req.body.commuteTime || req.body.dailyCommuteTime || '';
-    const partTimeJob = req.body.partTimeJob || req.body.partTimeWork || '';
-    const activeBacklogs = req.body.activeBacklogs || '';
-    const studyHoursPerDay = req.body.studyHoursPerDay || req.body.dailySelfStudyHours || '';
-    const sleepHoursPerNight = req.body.sleepHoursPerNight || req.body.nightlySleepHours || '';
-    const mentalHealthStatus = req.body.mentalHealthStatus || req.body.mentalHealthState || '';
-    const addictions = req.body.addictions || req.body.impactFactors || [];
+    // Support both flat fields & nested surveyData objects in req.body
+    const bodySource = req.body.surveyData || req.body;
+
+    const familyIncome = bodySource.familyIncome || bodySource.familyMonthlyIncome || '';
+    const financialStress = bodySource.financialStress || bodySource.moneyFeeWorries || '';
+    const livingSituation = bodySource.livingSituation || '';
+    const commuteTime = bodySource.commuteTime || bodySource.dailyCommuteTime || '';
+    const partTimeJob = bodySource.partTimeJob || bodySource.partTimeWork || '';
+    const activeBacklogs = bodySource.activeBacklogs || '';
+    const studyHoursPerDay = bodySource.studyHoursPerDay || bodySource.dailySelfStudyHours || bodySource.academicWorkload || '';
+    const sleepHoursPerNight = bodySource.sleepHoursPerNight || bodySource.nightlySleepHours || '';
+    const mentalHealthStatus = bodySource.mentalHealthStatus || bodySource.mentalHealthState || '';
+    
+    // Normalize impact factors/addictions array strictly to string array
+    const rawFactors = bodySource.addictions || bodySource.impactFactors || req.body.addictions || req.body.impactFactors;
+    const cleanImpactFactors = normalizeImpactFactors(rawFactors);
 
     // --- FLEXIBLE RISK EVALUATION RULES ---
     let suggestedRiskCategory = 'None';
     let primaryCategoryEnum = 'NONE';
-    let suggestedRiskLevel = 'Medium Risk'; // Default risk elevation for poor indicators
 
     const mentalHealthLower = mentalHealthStatus.toLowerCase();
     const financialLower = financialStress.toLowerCase();
@@ -109,7 +196,7 @@ exports.submitStudentSurvey = async (req, res) => {
       activeBacklogs,
       nightlySleepHours: sleepHoursPerNight,
       mentalHealthState: mentalHealthStatus,
-      impactFactors: Array.isArray(addictions) ? addictions : [addictions].filter(Boolean),
+      impactFactors: cleanImpactFactors,
     };
 
     // Prepare profile update payload
@@ -128,7 +215,7 @@ exports.submitStudentSurvey = async (req, res) => {
       studyHoursPerDay,
       sleepHoursPerNight,
       mentalHealthSelfReport: mentalHealthStatus,
-      addictions,
+      addictions: cleanImpactFactors,
 
       // Nested survey object (For StudentProfile schema mapping)
       surveyData: surveyDataObject,
@@ -149,8 +236,8 @@ exports.submitStudentSurvey = async (req, res) => {
     const updatedProfile = await StudentProfile.findOneAndUpdate(
       { user: studentId },
       { $set: updateData },
-      { new: true, upsert: true, runValidators: false }
-    );
+      { returnDocument: 'after', upsert: true, runValidators: false }
+    ).lean();
 
     res.status(200).json({
       success: true,

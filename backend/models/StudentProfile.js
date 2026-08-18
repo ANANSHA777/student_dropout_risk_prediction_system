@@ -24,13 +24,13 @@ const studentProfileSchema = new mongoose.Schema(
     },
     cgpa: {
       type: Number,
-      default: null, // Default null ensures missing values don't display dummy numbers
+      default: null,
       min: 0,
       max: 10.0,
     },
     attendancePercentage: {
       type: Number,
-      default: null, // Default null ensures missing values display as N/A
+      default: null,
       min: 0,
       max: 100,
     },
@@ -38,19 +38,33 @@ const studentProfileSchema = new mongoose.Schema(
     // --- STUDENT SELF-ASSESSMENT & SURVEY DATA ---
     surveyCompleted: {
       type: Boolean,
-      default: false, // Tracks student survey completion status
+      default: false,
     },
+    surveyStatus: {
+      type: String,
+      default: 'Pending',
+    },
+    lastSurveySubmittedAt: {
+      type: Date,
+    },
+
+    // --- FLAT SURVEY FIELDS ---
+    familyIncome: { type: String, default: null },
+    financialStress: { type: String, default: null },
+    livingSituation: { type: String, default: null },
+    commuteTime: { type: String, default: null },
+    partTimeJob: { type: String, default: null },
+    activeBacklogs: { type: String, default: null },
+    studyHoursPerDay: { type: String, default: null },
+    sleepHoursPerNight: { type: String, default: null },
+    mentalHealthSelfReport: { type: String, default: null },
+    addictions: [{ type: String }],
+
+    // --- NESTED SURVEY OBJECT (FLEXIBLE / UNRESTRICTED) ---
+    // 💡 REMOVED default: '' from internal keys so Mongoose won't wipe existing fields!
     surveyData: {
-      familyMonthlyIncome: { type: String, default: '' },
-      moneyFeeWorries: { type: String, default: '' },
-      livingSituation: { type: String, default: '' },
-      partTimeWork: { type: String, default: '' },
-      dailySelfStudyHours: { type: String, default: '' },
-      dailyCommuteTime: { type: String, default: '' },
-      activeBacklogs: { type: String, default: '' },
-      nightlySleepHours: { type: String, default: '' },
-      mentalHealthState: { type: String, default: '' },
-      impactFactors: [{ type: String }],
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
 
     assignmentsSubmitted: {
@@ -92,7 +106,7 @@ const studentProfileSchema = new mongoose.Schema(
     // --- AI DIAGNOSTIC & CLASSIFICATION FIELDS ---
     riskEvaluated: {
       type: Boolean,
-      default: false, // Explicitly tracks if AI evaluation was performed
+      default: false,
     },
     riskScore: {
       type: Number,
@@ -100,11 +114,11 @@ const studentProfileSchema = new mongoose.Schema(
     },
     riskLevel: {
       type: String,
-      default: null, // Default null ensures new/unevaluated students display "Not Evaluated"
+      default: null,
     },
     riskCategory: {
       type: String,
-      default: 'None', // Stores categories like "Wellness & Mental Health", "Financial Burden", "Academic Concern", etc.
+      default: 'None',
     },
     primaryRiskCategory: {
       type: String,
@@ -134,6 +148,7 @@ const studentProfileSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    strict: false, // 💡 Essential so unexpected UI fields aren't discarded on submit
   }
 );
 
