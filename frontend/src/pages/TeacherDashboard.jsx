@@ -76,17 +76,45 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Trigger AI Risk Evaluation (Updates database record and reloads data)
+  // Trigger AI Risk Evaluation (Updates database AND immediate frontend state)
   const handleEvaluateRisk = async (studentId) => {
     setEvaluatingStudentId(studentId);
     setError(null);
     try {
       const result = await triggerStudentRiskEvaluation(studentId);
-      await loadData();
       
-      const cat = result?.riskCategory || result?.data?.riskCategory;
+      const assessmentData = result?.assessment || result?.data || result;
+
+      // Optimistically update student state immediately with fresh evaluation data
+      setStudents((prevStudents) =>
+        prevStudents.map((s) => {
+          const isTarget = s._id === studentId || s.id === studentId || s.studentId === studentId;
+          if (!isTarget) return s;
+
+          return {
+            ...s,
+            riskLevel: assessmentData?.riskLevel || s.riskLevel,
+            riskCategory: assessmentData?.riskCategory || s.riskCategory,
+            primaryRiskCategory: assessmentData?.primaryRiskCategory || s.primaryRiskCategory,
+            riskEvaluated: true,
+            aiRecommendations: assessmentData?.aiRecommendations || s.aiRecommendations,
+            recommendedActions: assessmentData?.recommendedActions || {
+              ...(s.recommendedActions || {}),
+              escalateToCounselor: assessmentData?.escalateToCounselor ?? true,
+              assignCounselor: assessmentData?.assignCounselor ?? true,
+            },
+            escalateToCounselor: assessmentData?.escalateToCounselor ?? true,
+            assignCounselor: assessmentData?.assignCounselor ?? true,
+          };
+        })
+      );
+
+      // Reload full roster to ensure server state consistency
+      await loadData();
+
+      const cat = assessmentData?.riskCategory;
       if (cat && cat !== 'None') {
-        showFeedback(`AI Risk Evaluation completed: ${result?.riskLevel || ''} Risk (${cat}).`);
+        showFeedback(`AI Risk Evaluation completed: ${assessmentData?.riskLevel || ''} (${cat}).`);
       } else {
         showFeedback('AI risk level evaluation updated successfully.');
       }

@@ -22,8 +22,8 @@ const LandingPage = () => {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between overflow-hidden relative selection:bg-indigo-500 selection:text-white">
       
       {/* Dynamic Background Glow Blobs */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-gradient-to-tr from-indigo-600/20 via-sky-500/10 to-purple-600/20 blur-[120px] pointer-events-none rounded-full" />
-      <div className="absolute top-[40%] right-[-10%] w-[500px] h-[500px] bg-blue-600/10 blur-[150px] pointer-events-none rounded-full" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-250 h-125 bg-linear-to-tr from-indigo-600/20 via-sky-500/10 to-purple-600/20 blur-[120px] pointer-events-none rounded-full" />
+      <div className="absolute top-[40%] right-[-10%] w-125 h-125 bg-blue-600/10 blur-[150px] pointer-events-none rounded-full" />
 
       {/* Navigation Header */}
       <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl sticky top-0 z-50">
@@ -49,7 +49,7 @@ const LandingPage = () => {
             </Link>
             <Link
               to="/register"
-              className="px-4 py-2 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-lg transition shadow-lg shadow-indigo-500/25 flex items-center gap-1.5 transform hover:-translate-y-0.5 active:translate-y-0"
+              className="px-4 py-2 text-sm font-semibold bg-linear-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-lg transition shadow-lg shadow-indigo-500/25 flex items-center gap-1.5 transform hover:-translate-y-0.5 active:translate-y-0"
             >
               Get Started <ArrowRight size={14} />
             </Link>
@@ -68,7 +68,7 @@ const LandingPage = () => {
         {/* Updated Main Heading: Replaced "Attrition" with "Dropout" */}
         <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold text-white tracking-tight leading-[1.15] max-w-5xl mx-auto">
           Prevent Student Dropouts <br className="hidden sm:inline" />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-sky-300 to-purple-400">
+          <span className="text-transparent bg-clip-text bg-linear-to-r from-indigo-400 via-sky-300 to-purple-400">
             Before It's Too Late
           </span>
         </h1>
@@ -95,7 +95,7 @@ const LandingPage = () => {
 
         {/* Live UI Mockup Preview */}
         <div className="mt-16 max-w-4xl mx-auto p-3 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-2xl backdrop-blur-xl relative group">
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-sky-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
+          <div className="absolute -inset-0.5 bg-linear-to-r from-indigo-500 to-sky-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
           <div className="relative rounded-xl bg-slate-950 p-4 sm:p-6 text-left border border-slate-800/80">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
               <div className="flex items-center gap-2">

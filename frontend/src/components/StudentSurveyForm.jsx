@@ -1,130 +1,57 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Sparkles, DollarSign, BookOpen, Heart, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+// src/components/StudentSurveyForm.jsx
+import React, { useState, useEffect } from 'react';
+import { Brain, CheckCircle2, Send, AlertCircle, Edit3, ChevronUp } from 'lucide-react';
 
-const StudentSurveyForm = ({ initialData, onSurveySubmitted, studentId = null }) => {
-  const defaultState = {
-    familyMonthlyIncome: 'Below ₹15,000',
-    moneyFeeWorries: 'Low (No issue)',
-    livingSituation: 'With Family',
+export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted, studentId }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState({
+    academicInterest: 'High (Interested & Motivated)',
+    abilityToStudy: 'Full (Good Environment & Focus)',
+    familyMonthlyIncome: 'Above ₹60,000',
+    moneyFeeWorries: 'Moderate (Manageable)',
+    livingSituation: 'Campus Hostel',
     partTimeWork: 'No Job',
-    dailySelfStudyHours: '3 - 5 hours',
+    dailySelfStudyHours: '1 - 2 hours',
     dailyCommuteTime: 'Less than 30 mins',
     activeBacklogs: '0 Backlogs',
-    nightlySleepHours: '7 - 8 hours',
+    nightlySleepHours: '5 - 6 hours',
     mentalHealthState: 'Good / Balanced',
     impactFactors: ['None of the Above'],
-  };
+  });
 
-  const [formData, setFormData] = useState(defaultState);
-  const [loading, setLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState(null);
 
-  // Helper to extract and map survey fields from raw DB object safely
-  const mapDataToForm = useCallback((source) => {
-    if (!source) return defaultState;
-
-    const nested = source.surveyData || {};
-
-    return {
-      familyMonthlyIncome:
-        nested.familyMonthlyIncome ||
-        nested.familyIncome ||
-        source.familyIncome ||
-        source.familyMonthlyIncome ||
-        'Below ₹15,000',
-      moneyFeeWorries:
-        nested.moneyFeeWorries ||
-        nested.feeWorries ||
-        source.moneyFeeWorries ||
-        source.financialStress ||
-        'Low (No issue)',
-      livingSituation:
-        nested.livingSituation ||
-        source.livingSituation ||
-        'With Family',
-      partTimeWork:
-        nested.partTimeWork ||
-        nested.partTimeJob ||
-        source.partTimeWork ||
-        source.partTimeJob ||
-        'No Job',
-      dailySelfStudyHours:
-        nested.dailySelfStudyHours ||
-        nested.selfStudyHours ||
-        source.dailySelfStudyHours ||
-        source.studyHoursPerDay ||
-        '3 - 5 hours',
-      dailyCommuteTime:
-        nested.dailyCommuteTime ||
-        nested.commuteTime ||
-        source.dailyCommuteTime ||
-        source.commuteTime ||
-        'Less than 30 mins',
-      activeBacklogs:
-        nested.activeBacklogs ||
-        nested.backlogs ||
-        source.activeBacklogs ||
-        '0 Backlogs',
-      nightlySleepHours:
-        nested.nightlySleepHours ||
-        nested.sleepHours ||
-        source.nightlySleepHours ||
-        source.sleepHoursPerNight ||
-        '7 - 8 hours',
-      mentalHealthState:
-        nested.mentalHealthState ||
-        nested.mentalHealth ||
-        source.mentalHealthState ||
-        source.mentalHealthStatus ||
-        source.mentalHealthSelfReport ||
-        'Good / Balanced',
-      impactFactors: Array.isArray(nested.impactFactors) && nested.impactFactors.length > 0
-        ? nested.impactFactors
-        : Array.isArray(source.addictions) && source.addictions.length > 0
-        ? source.addictions
-        : ['None of the Above'],
-    };
-  }, []);
-
-  // Sync state on load or when initialData arrives
   useEffect(() => {
-    if (initialData && Object.keys(initialData).length > 0) {
-      setFormData(mapDataToForm(initialData));
-    } else {
-      // Direct DB Fetch Fallback if parent component passed null/empty initialData on refresh
-      const fetchProfileOnMount = async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch('/api/student/profile', {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token && { Authorization: `Bearer ${token}` }),
-            },
-          });
-          const result = await res.json();
-          if (res.ok && result.profile) {
-            setFormData(mapDataToForm(result.profile));
-          }
-        } catch (err) {
-          console.error('Failed to auto-fetch profile on mount:', err);
-        }
-      };
-
-      fetchProfileOnMount();
+    if (initialData) {
+      setFormData((prev) => ({
+        ...prev,
+        academicInterest: initialData.academicInterest || prev.academicInterest,
+        abilityToStudy: initialData.abilityToStudy || prev.abilityToStudy,
+        familyMonthlyIncome: initialData.familyMonthlyIncome || initialData.familyIncome || prev.familyMonthlyIncome,
+        moneyFeeWorries: initialData.moneyFeeWorries || initialData.financialStress || prev.moneyFeeWorries,
+        livingSituation: initialData.livingSituation || prev.livingSituation,
+        partTimeWork: initialData.partTimeWork || initialData.partTimeJob || prev.partTimeWork,
+        dailySelfStudyHours: initialData.dailySelfStudyHours || initialData.studyHoursPerDay || prev.dailySelfStudyHours,
+        dailyCommuteTime: initialData.dailyCommuteTime || initialData.commuteTime || prev.dailyCommuteTime,
+        activeBacklogs: initialData.activeBacklogs || prev.activeBacklogs,
+        nightlySleepHours: initialData.nightlySleepHours || initialData.sleepHoursPerNight || prev.nightlySleepHours,
+        mentalHealthState: initialData.mentalHealthState || initialData.mentalHealthSelfReport || prev.mentalHealthState,
+        impactFactors: initialData.impactFactors?.length ? initialData.impactFactors : prev.impactFactors,
+      }));
     }
-  }, [initialData, mapDataToForm]);
+  }, [initialData]);
+
+  const isCompleted = initialData?.surveyCompleted || initialData?.surveyStatus === 'Completed';
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleCheckboxChange = (factor) => {
     setFormData((prev) => {
-      let current = [...(prev.impactFactors || [])];
+      let current = [...prev.impactFactors];
 
       if (factor === 'None of the Above') {
         return { ...prev, impactFactors: ['None of the Above'] };
@@ -138,7 +65,9 @@ const StudentSurveyForm = ({ initialData, onSurveySubmitted, studentId = null })
         current.push(factor);
       }
 
-      if (current.length === 0) current = ['None of the Above'];
+      if (current.length === 0) {
+        current = ['None of the Above'];
+      }
 
       return { ...prev, impactFactors: current };
     });
@@ -146,299 +75,379 @@ const StudentSurveyForm = ({ initialData, onSurveySubmitted, studentId = null })
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setStatusMessage({ type: '', text: '' });
+    setSubmitting(true);
+    setMessage(null);
+
+    const payload = {
+      ...formData,
+      studentId: studentId || initialData._id || initialData.id,
+      surveyCompleted: true,
+      surveyStatus: 'Completed',
+      lastSurveySubmittedAt: new Date().toISOString(),
+      surveyData: { ...formData },
+    };
 
     try {
-      const token = localStorage.getItem('token');
-      const targetStudentId = studentId || initialData?._id || initialData?.id;
-
-      const payload = {
-        studentId: targetStudentId,
-        surveyCompleted: true,
-        surveyStatus: 'Completed',
-        isSurveyDone: true,
-        financialStress: formData.moneyFeeWorries,
-        mentalHealthStatus: formData.mentalHealthState,
-        mentalHealthSelfReport: formData.mentalHealthState,
-        ...formData,
-        surveyData: {
-          ...formData,
-          familyIncome: formData.familyMonthlyIncome,
-          feeWorries: formData.moneyFeeWorries,
-          partTimeJob: formData.partTimeWork,
-          selfStudyHours: formData.dailySelfStudyHours,
-          commuteTime: formData.dailyCommuteTime,
-          backlogs: formData.activeBacklogs,
-          sleepHours: formData.nightlySleepHours,
-          mentalHealth: formData.mentalHealthState,
-        },
-      };
-
-      const response = await fetch('/api/student/survey', {
+      const res = await fetch('/api/student/survey', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` }),
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
+      const data = await res.json();
 
-      if (!response.ok) {
-        throw new Error(result.message || 'Failed to submit self-assessment');
+      if (data.success || res.ok) {
+        setMessage({ type: 'success', text: 'Self-assessment updated successfully!' });
+        setIsEditing(false);
+        if (onSurveySubmitted) {
+          onSurveySubmitted(data.profile || payload);
+        }
+      } else {
+        throw new Error(data.message || 'Failed to update self-assessment.');
       }
-
-      // Update state with saved response immediately to avoid state flicker
-      const updatedProfile = result.profile || result.data || payload;
-      setFormData(mapDataToForm(updatedProfile));
-
-      setStatusMessage({
-        type: 'success',
-        text: 'Self-assessment survey submitted successfully!',
-      });
-
-      if (onSurveySubmitted) {
-        onSurveySubmitted(updatedProfile);
-      }
-    } catch (error) {
-      console.error('Survey Submission Error:', error);
-      setStatusMessage({
-        type: 'error',
-        text: error.message || 'An error occurred while submitting your survey.',
-      });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Error connecting to server.' });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
+      setTimeout(() => setMessage(null), 4000);
     }
   };
 
   return (
-    <div className="w-full bg-slate-900 border border-slate-800 rounded-xl p-6 text-slate-200 shadow-xl">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6 text-slate-200 shadow-xl">
       {/* Header */}
-      <div className="mb-6">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <Sparkles className="text-indigo-400" size={20} />
-          Student Self-Assessment & Lifestyle Survey
-        </h3>
-        <p className="text-xs text-slate-400 mt-1">
-          Structured metrics to help identify potential academic or wellness roadblocks early.
-        </p>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+        <div>
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <Brain className="text-indigo-400" size={22} />
+            Student Self-Assessment & Lifestyle Survey
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Structured metrics to help identify potential academic or wellness roadblocks early.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span
+            className={`text-xs px-3 py-1 rounded-full border font-semibold flex items-center gap-1.5 ${
+              isCompleted
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+            }`}
+          >
+            <CheckCircle2 size={14} />
+            Survey Status: {isCompleted ? 'Completed' : 'Pending'}
+          </span>
+
+          {/* Single Primary Action Button */}
+          {isCompleted && !isEditing && (
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Edit3 size={14} />
+              Update Self-Assessment
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Alert Banner */}
-      {statusMessage.text && (
+      {/* Feedback Toast */}
+      {message && (
         <div
-          className={`p-3.5 mb-6 rounded-lg text-xs font-semibold flex items-center gap-2 ${
-            statusMessage.type === 'success'
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-              : 'bg-red-500/10 text-red-400 border border-red-500/30'
+          className={`p-3 rounded-lg text-xs font-semibold flex items-center gap-2 ${
+            message.type === 'success'
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+              : 'bg-red-500/10 border border-red-500/30 text-red-300'
           }`}
         >
-          {statusMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-          <span>{statusMessage.text}</span>
+          {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {message.text}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* SECTION 1: FINANCIAL & LOGISTICAL */}
-        <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3 flex items-center gap-1.5">
-            <DollarSign size={14} /> FINANCIAL & LOGISTICAL INDICATORS
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* COLLAPSED / COMPLETED SUMMARY VIEW */}
+      {isCompleted && !isEditing ? (
+        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Family Monthly Income (₹)</label>
-              <select
-                name="familyMonthlyIncome"
-                value={formData.familyMonthlyIncome}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="Below ₹15,000">Below ₹15,000</option>
-                <option value="₹15,000 - ₹30,000">₹15,000 - ₹30,000</option>
-                <option value="₹30,000 - ₹60,000">₹30,000 - ₹60,000</option>
-                <option value="Above ₹60,000">Above ₹60,000</option>
-              </select>
+              <span className="text-slate-500 block font-medium">Academic Interest:</span>
+              <span className="text-slate-200 font-semibold">{formData.academicInterest}</span>
             </div>
+            <div>
+              <span className="text-slate-500 block font-medium">Study Ability:</span>
+              <span className="text-slate-200 font-semibold">{formData.abilityToStudy}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 block font-medium">Financial Worries:</span>
+              <span className="text-slate-200 font-semibold">{formData.moneyFeeWorries}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 block font-medium">Mental Wellbeing:</span>
+              <span className="text-slate-200 font-semibold">{formData.mentalHealthState}</span>
+            </div>
+          </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Money & Fee Worries</label>
-              <select
-                name="moneyFeeWorries"
-                value={formData.moneyFeeWorries}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="Low (No issue)">Low (No issue)</option>
-                <option value="Moderate Strain">Moderate Strain</option>
-                <option value="High (Severe burden)">High (Severe burden)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Living Situation</label>
-              <select
-                name="livingSituation"
-                value={formData.livingSituation}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="With Family">With Family</option>
-                <option value="Hostel">Hostel</option>
-                <option value="Rented Flat / PG">Rented Flat / PG</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Part-Time Work / Job</label>
-              <select
-                name="partTimeWork"
-                value={formData.partTimeWork}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="No Job">No Job</option>
-                <option value="Part-time (<20 hrs/wk)">Part-time (&lt;20 hrs/wk)</option>
-                <option value="Full-time Work">Full-time Work</option>
-              </select>
-            </div>
+          <div className="pt-2 border-t border-slate-800/80 text-xs text-slate-400">
+            <span>
+              Factors Selected:{' '}
+              <strong className="text-indigo-300 font-medium">
+                {formData.impactFactors.join(', ')}
+              </strong>
+            </span>
           </div>
         </div>
+      ) : (
+        /* EXPANDED FULL SURVEY FORM */
+        <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-200">
+          {/* SECTION 1: ACADEMIC & STUDY ENGAGEMENT */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-indigo-400 tracking-wider uppercase flex items-center gap-1.5">
+              🎓 ACADEMIC & STUDY ENGAGEMENT
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Interest in Current Course</label>
+                <select
+                  name="academicInterest"
+                  value={formData.academicInterest}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="High (Interested & Motivated)">High (Interested & Motivated)</option>
+                  <option value="Moderate (Neutral)">Moderate (Neutral)</option>
+                  <option value="Low (Lost Interest / Disengaged)">Low (Lost Interest / Disengaged)</option>
+                </select>
+              </div>
 
-        {/* SECTION 2: ACADEMIC LOAD & SCHEDULE */}
-        <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3 flex items-center gap-1.5">
-            <BookOpen size={14} /> ACADEMIC LOAD & DAILY SCHEDULE
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Daily Self-Study Hours</label>
-              <select
-                name="dailySelfStudyHours"
-                value={formData.dailySelfStudyHours}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="Less than 1 hour">Less than 1 hour</option>
-                <option value="1 - 2 hours">1 - 2 hours</option>
-                <option value="3 - 5 hours">3 - 5 hours</option>
-                <option value="5+ hours">5+ hours</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Daily Commute Time</label>
-              <select
-                name="dailyCommuteTime"
-                value={formData.dailyCommuteTime}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="Less than 30 mins">Less than 30 mins</option>
-                <option value="1 - 2 hours">1 - 2 hours</option>
-                <option value="2+ hours">2+ hours</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Active Backlogs / Failed Papers</label>
-              <select
-                name="activeBacklogs"
-                value={formData.activeBacklogs}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="0 Backlogs">0 Backlogs</option>
-                <option value="1 - 2 Backlogs">1 - 2 Backlogs</option>
-                <option value="3+ Backlogs">3+ Backlogs</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 3: WELLNESS & BEHAVIOR */}
-        <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3 flex items-center gap-1.5">
-            <Heart size={14} /> WELLNESS & BEHAVIOR
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Nightly Sleep Hours</label>
-              <select
-                name="nightlySleepHours"
-                value={formData.nightlySleepHours}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="Less than 5 hours">Less than 5 hours</option>
-                <option value="5 - 6 hours">5 - 6 hours</option>
-                <option value="7 - 8 hours">7 - 8 hours</option>
-                <option value="8+ hours">8+ hours</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Mental Health & Emotional State</label>
-              <select
-                name="mentalHealthState"
-                value={formData.mentalHealthState}
-                onChange={handleChange}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition"
-              >
-                <option value="Good / Balanced">Good / Balanced</option>
-                <option value="Anxious / Stressed">Anxious / Stressed</option>
-                <option value="Overwhelmed">Overwhelmed</option>
-              </select>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Ability to Study Effectively</label>
+                <select
+                  name="abilityToStudy"
+                  value={formData.abilityToStudy}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Full (Good Environment & Focus)">Full (Good Environment & Focus)</option>
+                  <option value="Partial (Frequent Distractions)">Partial (Frequent Distractions)</option>
+                  <option value="Severe Focus Issues">Severe Focus Issues</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Impact Factors Checkboxes */}
-          <div className="mt-4 p-4 bg-slate-950 border border-slate-800 rounded-xl">
-            <label className="block text-xs text-slate-400 mb-2.5 font-medium">
-              Select any factors that impact your daily study routine:
-            </label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              {[
-                'Excessive Social Media',
-                'Excessive Gaming',
-                'Substance / Alcohol Use',
-                'None of the Above',
-              ].map((factor) => (
-                <label key={factor} className="flex items-center gap-2 cursor-pointer text-slate-300 select-none">
-                  <input
-                    type="checkbox"
-                    checked={(formData.impactFactors || []).includes(factor)}
-                    onChange={() => handleCheckboxChange(factor)}
-                    className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                  />
-                  <span>{factor}</span>
-                </label>
-              ))}
+          {/* SECTION 2: FINANCIAL & LOGISTICAL INDICATORS */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-indigo-400 tracking-wider uppercase flex items-center gap-1.5">
+              💲 FINANCIAL & LOGISTICAL INDICATORS
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Family Monthly Income (₹)</label>
+                <select
+                  name="familyMonthlyIncome"
+                  value={formData.familyMonthlyIncome}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Below ₹15,000">Below ₹15,000</option>
+                  <option value="₹15,000 - ₹30,000">₹15,000 - ₹30,000</option>
+                  <option value="₹30,000 - ₹60,000">₹30,000 - ₹60,000</option>
+                  <option value="Above ₹60,000">Above ₹60,000</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Money & Fee Worries</label>
+                <select
+                  name="moneyFeeWorries"
+                  value={formData.moneyFeeWorries}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Low (No Issue)">Low (No Issue)</option>
+                  <option value="Moderate (Manageable)">Moderate (Manageable)</option>
+                  <option value="High (Severe Financial Strain)">High (Severe Financial Strain)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Living Situation</label>
+                <select
+                  name="livingSituation"
+                  value={formData.livingSituation}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Campus Hostel">Campus Hostel</option>
+                  <option value="With Family">With Family</option>
+                  <option value="Rented Flat / PG">Rented Flat / PG</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Part-Time Work / Job</label>
+                <select
+                  name="partTimeWork"
+                  value={formData.partTimeWork}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="No Job">No Job</option>
+                  <option value="Part-time (< 20 hrs/wk)">Part-time (&lt; 20 hrs/wk)</option>
+                  <option value="Full-time / Heavy Workload">Full-time / Heavy Workload</option>
+                </select>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Submit Actions */}
-        <div className="flex gap-3 pt-2">
-          <button
-            type="submit"
-            disabled={loading}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition cursor-pointer shadow-lg active:scale-95 disabled:opacity-50"
-          >
-            {loading ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                <span>Submitting Self-Assessment...</span>
-              </>
-            ) : (
-              <span>Submit Self-Assessment Update</span>
+          {/* SECTION 3: ACADEMIC LOAD & DAILY SCHEDULE */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-indigo-400 tracking-wider uppercase flex items-center gap-1.5">
+              📖 ACADEMIC LOAD & DAILY SCHEDULE
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Daily Self-Study Hours</label>
+                <select
+                  name="dailySelfStudyHours"
+                  value={formData.dailySelfStudyHours}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Less than 1 hour">Less than 1 hour</option>
+                  <option value="1 - 2 hours">1 - 2 hours</option>
+                  <option value="3 - 5 hours">3 - 5 hours</option>
+                  <option value="More than 5 hours">More than 5 hours</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Daily Commute Time</label>
+                <select
+                  name="dailyCommuteTime"
+                  value={formData.dailyCommuteTime}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Less than 30 mins">Less than 30 mins</option>
+                  <option value="1 - 2 hours">1 - 2 hours</option>
+                  <option value="More than 2 hours">More than 2 hours</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Active Backlogs / Failed Papers</label>
+                <select
+                  name="activeBacklogs"
+                  value={formData.activeBacklogs}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="0 Backlogs">0 Backlogs</option>
+                  <option value="1 - 2 Backlogs">1 - 2 Backlogs</option>
+                  <option value="3+ Backlogs">3+ Backlogs</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 4: WELLNESS & BEHAVIOR */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-indigo-400 tracking-wider uppercase flex items-center gap-1.5">
+              ♡ WELLNESS & BEHAVIOR
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Nightly Sleep Hours</label>
+                <select
+                  name="nightlySleepHours"
+                  value={formData.nightlySleepHours}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Less than 5 hours">Less than 5 hours</option>
+                  <option value="5 - 6 hours">5 - 6 hours</option>
+                  <option value="7 - 8 hours">7 - 8 hours</option>
+                  <option value="8+ hours">8+ hours</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Mental Health & Emotional State</label>
+                <select
+                  name="mentalHealthState"
+                  value={formData.mentalHealthState}
+                  onChange={handleChange}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="Good / Balanced">Good / Balanced</option>
+                  <option value="Anxious / Stressed">Anxious / Stressed</option>
+                  <option value="Depressed / Overwhelmed">Depressed / Overwhelmed</option>
+                </select>
+              </div>
+            </div>
+
+            {/* CHECKBOXES */}
+            <div className="pt-2">
+              <label className="block text-xs text-slate-400 mb-3">
+                Select any factors that impact your daily study routine:
+              </label>
+              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  'Excessive Social Media',
+                  'Excessive Gaming',
+                  'Substance / Alcohol Use',
+                  'None of the Above',
+                ].map((factor) => {
+                  const checked = formData.impactFactors.includes(factor);
+                  return (
+                    <label
+                      key={factor}
+                      className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer hover:text-white transition"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleCheckboxChange(factor)}
+                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-950"
+                      />
+                      <span>{factor}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* FORM FOOTER ACTIONS */}
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2.5 rounded-lg text-xs transition flex items-center gap-2 shadow-md cursor-pointer disabled:opacity-50"
+            >
+              <Send size={14} />
+              {submitting ? 'Saving Assessment...' : 'Submit Self-Assessment'}
+            </button>
+
+            {isCompleted && (
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2.5 rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <ChevronUp size={14} />
+                Cancel Editing
+              </button>
             )}
-          </button>
-        </div>
-      </form>
+          </div>
+        </form>
+      )}
     </div>
   );
-};
-
-export default StudentSurveyForm;
+}

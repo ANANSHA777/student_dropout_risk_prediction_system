@@ -53,7 +53,7 @@ const normalizeImpactFactors = (rawFactors) => {
 
 // @desc    Get current student's academic profile and risk indicators
 // @route   GET /api/student/profile
-// @access  Private (Student)
+// @access  Private (Student / Teacher)
 exports.getStudentProfile = async (req, res) => {
   try {
     const rawUserId = req.user._id || req.user.id;
@@ -74,32 +74,45 @@ exports.getStudentProfile = async (req, res) => {
           email: user ? user.email : req.user.email,
           attendancePercentage: null,
           cgpa: null,
+          academicInterest: 'High (Interested & Motivated)',
+          abilityToStudy: 'Full (Good Environment & Focus)',
           surveyCompleted: false,
           surveyStatus: 'Pending',
           riskLevel: 'Unevaluated',
           riskCategory: 'None',
+          canEvaluate: false,
           aiRecommendations: ['Maintain regular class attendance.'],
           surveyData: {},
         },
       });
     }
 
+    // Check if prerequisite conditions are met to enable the AI Evaluation Button on Frontend
+    const hasTeacherMetrics = profile.cgpa !== null && profile.cgpa !== undefined &&
+                             profile.attendancePercentage !== null && profile.attendancePercentage !== undefined;
+    const hasStudentSurvey = Boolean(profile.surveyCompleted);
+    const canEvaluate = hasTeacherMetrics && hasStudentSurvey;
+
     // Safely extract nested surveyData object
     const sData = profile.surveyData || {};
 
     // Reconstruct normalized survey values with fallbacks across flat and nested schemas
     const normalizedSurveyData = {
-      familyMonthlyIncome: sData.familyMonthlyIncome || profile.familyIncome || '',
-      moneyFeeWorries: sData.moneyFeeWorries || profile.financialStress || '',
+      academicInterest: sData.academicInterest || profile.academicInterest || 'High (Interested & Motivated)',
+      abilityToStudy: sData.abilityToStudy || profile.abilityToStudy || 'Full (Good Environment & Focus)',
+      familyMonthlyIncome: sData.familyMonthlyIncome || profile.familyMonthlyIncome || profile.familyIncome || '',
+      moneyFeeWorries: sData.moneyFeeWorries || profile.moneyFeeWorries || profile.financialStress || '',
       livingSituation: sData.livingSituation || profile.livingSituation || '',
-      partTimeWork: sData.partTimeWork || profile.partTimeJob || '',
-      dailySelfStudyHours: sData.dailySelfStudyHours || profile.studyHoursPerDay || '',
-      dailyCommuteTime: sData.dailyCommuteTime || profile.commuteTime || '',
+      partTimeWork: sData.partTimeWork || profile.partTimeWork || profile.partTimeJob || '',
+      dailySelfStudyHours: sData.dailySelfStudyHours || profile.dailySelfStudyHours || profile.studyHoursPerDay || '',
+      dailyCommuteTime: sData.dailyCommuteTime || profile.dailyCommuteTime || profile.commuteTime || '',
       activeBacklogs: sData.activeBacklogs || profile.activeBacklogs || '',
-      nightlySleepHours: sData.nightlySleepHours || profile.sleepHoursPerNight || '',
-      mentalHealthState: sData.mentalHealthState || profile.mentalHealthSelfReport || '',
+      nightlySleepHours: sData.nightlySleepHours || profile.nightlySleepHours || profile.sleepHoursPerNight || '',
+      mentalHealthState: sData.mentalHealthState || profile.mentalHealthState || profile.mentalHealthSelfReport || '',
       impactFactors: (sData.impactFactors && sData.impactFactors.length > 0)
         ? sData.impactFactors
+        : (profile.impactFactors && profile.impactFactors.length > 0)
+        ? profile.impactFactors
         : (profile.addictions && profile.addictions.length > 0)
         ? profile.addictions
         : ['None of the Above'],
@@ -111,8 +124,13 @@ exports.getStudentProfile = async (req, res) => {
         ...profile,
         name: req.user.name,
         email: req.user.email,
+        surveyCompleted: Boolean(profile.surveyCompleted),
         surveyStatus: profile.surveyCompleted ? 'Completed' : 'Pending',
-        // Guarantees all UI forms can read top-level AND nested fields reliably
+        riskLevel: profile.riskLevel || 'Unevaluated',
+        riskCategory: profile.riskCategory || 'None',
+        canEvaluate, // Enable AI evaluate button ONLY if CGPA, Attendance, and Survey are complete
+        academicInterest: normalizedSurveyData.academicInterest,
+        abilityToStudy: normalizedSurveyData.abilityToStudy,
         financialStress: profile.financialStress || normalizedSurveyData.moneyFeeWorries,
         mentalHealthStatus: profile.mentalHealthSelfReport || normalizedSurveyData.mentalHealthState,
         studyHoursPerDay: profile.studyHoursPerDay || normalizedSurveyData.dailySelfStudyHours,
@@ -142,6 +160,8 @@ exports.submitStudentSurvey = async (req, res) => {
     // Support both flat fields & nested surveyData objects in req.body
     const bodySource = req.body.surveyData || req.body;
 
+    const academicInterest = bodySource.academicInterest || req.body.academicInterest || 'High (Interested & Motivated)';
+    const abilityToStudy = bodySource.abilityToStudy || req.body.abilityToStudy || 'Full (Good Environment & Focus)';
     const familyIncome = bodySource.familyIncome || bodySource.familyMonthlyIncome || '';
     const financialStress = bodySource.financialStress || bodySource.moneyFeeWorries || '';
     const livingSituation = bodySource.livingSituation || '';
@@ -151,42 +171,15 @@ exports.submitStudentSurvey = async (req, res) => {
     const studyHoursPerDay = bodySource.studyHoursPerDay || bodySource.dailySelfStudyHours || bodySource.academicWorkload || '';
     const sleepHoursPerNight = bodySource.sleepHoursPerNight || bodySource.nightlySleepHours || '';
     const mentalHealthStatus = bodySource.mentalHealthStatus || bodySource.mentalHealthState || '';
-    
+
     // Normalize impact factors/addictions array strictly to string array
     const rawFactors = bodySource.addictions || bodySource.impactFactors || req.body.addictions || req.body.impactFactors;
     const cleanImpactFactors = normalizeImpactFactors(rawFactors);
 
-    // --- FLEXIBLE RISK EVALUATION RULES ---
-    let suggestedRiskCategory = 'None';
-    let primaryCategoryEnum = 'NONE';
-
-    const mentalHealthLower = mentalHealthStatus.toLowerCase();
-    const financialLower = financialStress.toLowerCase();
-
-    // Rule 1: Mental Health / Emotional Distress -> Trigger Counselor Category
-    if (
-      mentalHealthLower.includes('anxious') ||
-      mentalHealthLower.includes('stress') ||
-      mentalHealthLower.includes('overwhelmed') ||
-      mentalHealthLower.includes('depressed') ||
-      mentalHealthLower.includes('poor')
-    ) {
-      suggestedRiskCategory = 'Wellness & Mental Health';
-      primaryCategoryEnum = 'WELLNESS';
-    } 
-    // Rule 2: High Financial Burden -> Trigger Financial / Counselor Category
-    else if (
-      financialLower.includes('high') ||
-      financialLower.includes('severe') ||
-      financialLower.includes('burden') ||
-      financialLower.includes('emergency')
-    ) {
-      suggestedRiskCategory = 'Financial Burden';
-      primaryCategoryEnum = 'FINANCIAL';
-    }
-
     // Structured nested survey object for schema persistence
     const surveyDataObject = {
+      academicInterest,
+      abilityToStudy,
       familyMonthlyIncome: familyIncome,
       moneyFeeWorries: financialStress,
       livingSituation,
@@ -199,56 +192,160 @@ exports.submitStudentSurvey = async (req, res) => {
       impactFactors: cleanImpactFactors,
     };
 
-    // Prepare profile update payload
+    // Prepare profile update payload (Pure survey save without auto-evaluating risk)
     const updateData = {
       surveyCompleted: true,
       surveyStatus: 'Completed',
       lastSurveySubmittedAt: new Date(),
 
       // Flat Survey Fields (For direct query access)
+      academicInterest,
+      abilityToStudy,
       familyIncome,
+      familyMonthlyIncome: familyIncome,
       financialStress,
+      moneyFeeWorries: financialStress,
       livingSituation,
       commuteTime,
+      dailyCommuteTime: commuteTime,
       partTimeJob,
+      partTimeWork: partTimeJob,
       activeBacklogs,
       studyHoursPerDay,
+      dailySelfStudyHours: studyHoursPerDay,
       sleepHoursPerNight,
+      nightlySleepHours: sleepHoursPerNight,
       mentalHealthSelfReport: mentalHealthStatus,
+      mentalHealthState: mentalHealthStatus,
       addictions: cleanImpactFactors,
+      impactFactors: cleanImpactFactors,
 
       // Nested survey object (For StudentProfile schema mapping)
       surveyData: surveyDataObject,
     };
 
-    // If wellness or financial flags were detected, update risk category & recommendation flags
-    if (suggestedRiskCategory !== 'None') {
-      updateData.riskCategory = suggestedRiskCategory;
-      updateData.primaryRiskCategory = primaryCategoryEnum;
-      
-      // Upgrade risk level if currently unassigned or low
-      updateData.riskLevel = 'Medium';
-      
-      // Auto-flag for counselor escalation
-      updateData['recommendedActions.escalateToCounselor'] = true;
-    }
+    // 1. Sync User document completion flag
+    await User.findByIdAndUpdate(studentId, { $set: { surveyCompleted: true } });
 
+    // 2. Persist updated profile document
     const updatedProfile = await StudentProfile.findOneAndUpdate(
       { user: studentId },
       { $set: updateData },
       { returnDocument: 'after', upsert: true, runValidators: false }
     ).lean();
 
+    // Check evaluate condition for frontend UI state
+    const hasTeacherMetrics = updatedProfile.cgpa !== null && updatedProfile.cgpa !== undefined && 
+                             updatedProfile.attendancePercentage !== null && updatedProfile.attendancePercentage !== undefined;
+    const canEvaluate = hasTeacherMetrics && true;
+
+    // 3. Send normalized payload to prevent state mismatches in React
     res.status(200).json({
       success: true,
-      message: 'Self-assessment survey recorded successfully',
-      profile: updatedProfile,
+      message: 'Self-assessment survey recorded successfully. Pending teacher AI evaluation.',
+      profile: {
+        ...updatedProfile,
+        surveyCompleted: true,
+        surveyStatus: 'Completed',
+        canEvaluate,
+        academicInterest,
+        abilityToStudy,
+        financialStress,
+        mentalHealthStatus,
+        studyHoursPerDay,
+        surveyData: surveyDataObject,
+      },
     });
   } catch (error) {
     console.error('Error in submitStudentSurvey:', error);
     res.status(500).json({
       success: false,
       message: 'Server error submitting self-assessment',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Explicitly evaluate AI risk & classify student (Triggered only when Teacher clicks AI Evaluate)
+// @route   POST /api/teacher/evaluate-student
+// @access  Private (Teacher)
+exports.evaluateStudentRisk = async (req, res) => {
+  try {
+    const { studentId } = req.body;
+    const profile = await StudentProfile.findById(studentId);
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found.' });
+    }
+
+    // Require both Teacher Metrics and Student Survey to be present before evaluating
+    const hasTeacherMetrics = profile.cgpa !== null && profile.cgpa !== undefined && 
+                             profile.attendancePercentage !== null && profile.attendancePercentage !== undefined;
+    const hasStudentSurvey = profile.surveyCompleted === true;
+
+    if (!hasTeacherMetrics || !hasStudentSurvey) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot evaluate risk. Teacher CGPA/Attendance AND Student Survey must be submitted first.',
+      });
+    }
+
+    // Core Risk Classification Engine
+    let riskLevel = 'Low';
+    let riskCategory = 'None';
+    let assignedRole = 'TEACHER'; // 'TEACHER' for academic, 'COUNSELOR' for non-academic issues
+
+    const cgpa = profile.cgpa || 0;
+    const attendance = profile.attendancePercentage || 0;
+    const sData = profile.surveyData || {};
+
+    const mentalHealth = (sData.mentalHealthState || profile.mentalHealthState || '').toLowerCase();
+    const financial = (sData.moneyFeeWorries || profile.financialStress || '').toLowerCase();
+    const interest = (sData.academicInterest || profile.academicInterest || '').toLowerCase();
+
+    // 1. Academic Risk Checks
+    if (cgpa < 6.0 || attendance < 75 || interest.includes('low') || interest.includes('disengaged')) {
+      riskLevel = cgpa < 4.5 || attendance < 60 ? 'High' : 'Medium';
+      riskCategory = 'Academic Disengagement';
+      assignedRole = 'TEACHER'; // Academic interventions assigned directly to teacher
+    } 
+    // 2. Wellness / Mental Health Risk Checks
+    else if (mentalHealth.includes('anxious') || mentalHealth.includes('overwhelmed') || mentalHealth.includes('stressed')) {
+      riskLevel = 'Medium';
+      riskCategory = 'Wellness & Mental Health';
+      assignedRole = 'COUNSELOR'; // Route to Counselor
+    } 
+    // 3. Financial Risk Checks
+    else if (financial.includes('high') || financial.includes('severe') || financial.includes('burden')) {
+      riskLevel = 'Medium';
+      riskCategory = 'Financial Burden';
+      assignedRole = 'COUNSELOR'; // Route to Counselor / Admin
+    }
+
+    // Save Evaluation Results
+    profile.riskLevel = riskLevel;
+    profile.riskCategory = riskCategory;
+    profile.riskEvaluated = true;
+    profile.evaluatedAt = new Date();
+    profile.assignedRole = assignedRole;
+
+    profile.recommendedActions = {
+      assignTeacherMentor: assignedRole === 'TEACHER',
+      escalateToCounselor: assignedRole === 'COUNSELOR',
+    };
+
+    await profile.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Evaluation completed successfully. Assigned to ${assignedRole}.`,
+      profile,
+    });
+  } catch (error) {
+    console.error('Error in evaluateStudentRisk:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error running student evaluation',
       error: error.message,
     });
   }

@@ -8,14 +8,17 @@ const studentProfileSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
       unique: true, // Guarantees one profile document per User
+      index: true,
     },
     studentId: {
       type: String,
       default: '',
+      index: true,
     },
     department: {
       type: String,
       default: 'Computer Science',
+      index: true,
     },
     yearOfStudy: {
       type: String,
@@ -49,19 +52,98 @@ const studentProfileSchema = new mongoose.Schema(
     },
 
     // --- FLAT SURVEY FIELDS ---
-    familyIncome: { type: String, default: null },
-    financialStress: { type: String, default: null },
-    livingSituation: { type: String, default: null },
-    commuteTime: { type: String, default: null },
-    partTimeJob: { type: String, default: null },
-    activeBacklogs: { type: String, default: null },
-    studyHoursPerDay: { type: String, default: null },
-    sleepHoursPerNight: { type: String, default: null },
-    mentalHealthSelfReport: { type: String, default: null },
+    academicInterest: { 
+      type: String, 
+      default: 'High (Interested & Motivated)' 
+    },
+    abilityToStudy: { 
+      type: String, 
+      default: 'Full (Good Environment & Focus)' 
+    },
+    familyIncome: { 
+      type: String, 
+      default: 'Above ₹60,000' 
+    },
+    familyMonthlyIncome: { 
+      type: String, 
+      default: 'Above ₹60,000' 
+    },
+    financialStress: { 
+      type: String, 
+      default: 'Moderate (Manageable)' 
+    },
+    moneyFeeWorries: { 
+      type: String, 
+      default: 'Moderate (Manageable)' 
+    },
+    livingSituation: { 
+      type: String, 
+      default: 'Campus Hostel' 
+    },
+    commuteTime: { 
+      type: String, 
+      default: 'Less than 30 mins' 
+    },
+    dailyCommuteTime: { 
+      type: String, 
+      default: 'Less than 30 mins' 
+    },
+    partTimeJob: { 
+      type: String, 
+      default: 'No Job' 
+    },
+    partTimeWork: { 
+      type: String, 
+      default: 'No Job' 
+    },
+    activeBacklogs: { 
+      type: String, 
+      default: '0 Backlogs' 
+    },
+    studyHoursPerDay: { 
+      type: String, 
+      default: '1 - 2 hours' 
+    },
+    dailySelfStudyHours: { 
+      type: String, 
+      default: '1 - 2 hours' 
+    },
+    academicWorkload: { 
+      type: String, 
+      default: '3 - 5 hours' 
+    },
+    sleepHoursPerNight: { 
+      type: String, 
+      default: '5 - 6 hours' 
+    },
+    nightlySleepHours: { 
+      type: String, 
+      default: '5 - 6 hours' 
+    },
+    mentalHealthSelfReport: { 
+      type: String, 
+      default: 'Anxious / Stressed' 
+    },
+    mentalHealthState: { 
+      type: String, 
+      default: 'Anxious / Stressed' 
+    },
+    mentalHealthStatus: { 
+      type: String, 
+      default: 'Good / Balanced' 
+    },
+    comments: {
+      type: String,
+      default: '',
+    },
+    additionalNotes: {
+      type: String,
+      default: '',
+    },
     addictions: [{ type: String }],
+    impactFactors: [{ type: String }],
 
     // --- NESTED SURVEY OBJECT (FLEXIBLE / UNRESTRICTED) ---
-    // 💡 REMOVED default: '' from internal keys so Mongoose won't wipe existing fields!
     surveyData: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
@@ -115,6 +197,7 @@ const studentProfileSchema = new mongoose.Schema(
     riskLevel: {
       type: String,
       default: null,
+      index: true,
     },
     riskCategory: {
       type: String,
@@ -122,8 +205,9 @@ const studentProfileSchema = new mongoose.Schema(
     },
     primaryRiskCategory: {
       type: String,
-      enum: ['ACADEMIC', 'ATTENDANCE', 'FINANCIAL', 'PERSONAL', 'WELLNESS', 'NONE'],
+      enum: ['ACADEMIC', 'ATTENDANCE', 'FINANCIAL', 'PERSONAL', 'WELLNESS', 'DUAL', 'NONE'],
       default: 'NONE',
+      index: true,
     },
 
     // --- AUTOMATED ACTION FLAGS ---
@@ -133,6 +217,10 @@ const studentProfileSchema = new mongoose.Schema(
         default: false,
       },
       matchPeerTutor: {
+        type: Boolean,
+        default: false,
+      },
+      assignTeacherMentor: {
         type: Boolean,
         default: false,
       },
@@ -148,8 +236,22 @@ const studentProfileSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    strict: false, // 💡 Essential so unexpected UI fields aren't discarded on submit
+    strict: false, // Essential so unexpected UI fields aren't discarded on submit
   }
 );
+
+// Indexes for administrative searches & analytical reporting
+studentProfileSchema.index({ department: 1, riskLevel: 1 });
+studentProfileSchema.index({ riskEvaluated: 1, primaryRiskCategory: 1 });
+
+// Virtual getter mapping `_id` to `id` for standardized API JSON returns
+studentProfileSchema.set('toJSON', {
+  virtuals: true,
+  transform: (doc, ret) => {
+    ret.id = ret._id;
+    delete ret.__v;
+    return ret;
+  },
+});
 
 module.exports = mongoose.model('StudentProfile', studentProfileSchema);
