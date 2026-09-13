@@ -1,4 +1,5 @@
 // backend/controllers/adminController.js
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const StudentProfile = require('../models/StudentProfile');
 
@@ -9,11 +10,21 @@ const getStaffMembers = async (req, res) => {
   try {
     const staff = await User.find({ role: { $in: ['Teacher', 'Counselor'] } })
       .select('-password')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    res.status(200).json({ success: true, count: staff.length, staff });
+    res.status(200).json({
+      success: true,
+      count: staff.length,
+      staff,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error while fetching staff', error: error.message });
+    console.error('Error in getStaffMembers:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching staff',
+      error: error.message,
+    });
   }
 };
 
@@ -25,18 +36,27 @@ const createStaffMember = async (req, res) => {
     const { name, email, role, department, password } = req.body;
 
     if (!name || !email || !role || !password) {
-      return res.status(400).json({ success: false, message: 'Please provide all required fields' });
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide all required fields (name, email, role, password)',
+      });
     }
 
     if (!['Teacher', 'Counselor'].includes(role)) {
-      return res.status(400).json({ success: false, message: 'Invalid role. Must be Teacher or Counselor' });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role. Must be Teacher or Counselor',
+      });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
 
     const userExists = await User.findOne({ email: normalizedEmail });
     if (userExists) {
-      return res.status(400).json({ success: false, message: 'A user with this email already exists' });
+      return res.status(400).json({
+        success: false,
+        message: 'A user with this email already exists',
+      });
     }
 
     const newStaff = await User.create({
@@ -44,17 +64,25 @@ const createStaffMember = async (req, res) => {
       email: normalizedEmail,
       password: password,
       role,
-      department: department || 'Computer Science',
+      department: department?.trim() || 'Computer Science',
       isFirstLogin: true,
     });
 
     const staffResponse = newStaff.toObject();
     delete staffResponse.password;
 
-    res.status(201).json({ success: true, staff: staffResponse });
+    res.status(201).json({
+      success: true,
+      message: `${role} account provisioned successfully`,
+      staff: staffResponse,
+    });
   } catch (error) {
     console.error('CRITICAL MONGOOSE CREATION ERROR:', error);
-    res.status(500).json({ success: false, message: 'Server error while creating staff', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Server error while creating staff',
+      error: error.message,
+    });
   }
 };
 
@@ -65,20 +93,41 @@ const deleteStaffMember = async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Staff ID format',
+      });
+    }
+
     const staffMember = await User.findById(id);
     if (!staffMember) {
-      return res.status(404).json({ success: false, message: 'Staff member not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Staff member not found',
+      });
     }
 
     if (!['Teacher', 'Counselor'].includes(staffMember.role)) {
-      return res.status(400).json({ success: false, message: 'Cannot delete non-staff user via this endpoint' });
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete non-staff user via this endpoint',
+      });
     }
 
     await User.findByIdAndDelete(id);
 
-    res.status(200).json({ success: true, message: 'Staff member removed successfully' });
+    res.status(200).json({
+      success: true,
+      message: 'Staff member removed successfully',
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error while deleting staff', error: error.message });
+    console.error('Error in deleteStaffMember:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting staff',
+      error: error.message,
+    });
   }
 };
 
@@ -91,8 +140,14 @@ const getOverallRiskAnalytics = async (req, res) => {
     const userIds = students.map((s) => s._id);
     const profiles = await StudentProfile.find({ user: { $in: userIds } }).lean();
 
+    // Map lookup table for performance O(N)
+    const profileMap = new Map();
+    profiles.forEach((p) => {
+      if (p.user) profileMap.set(p.user.toString(), p);
+    });
+
     const combinedStudents = students.map((user) => {
-      const profile = profiles.find((p) => p.user?.toString() === user._id.toString()) || {};
+      const profile = profileMap.get(user._id.toString()) || {};
       return {
         department: profile.department || user.department || 'Computer Science',
         yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
@@ -132,7 +187,11 @@ const getOverallRiskAnalytics = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching admin risk analytics:', error);
-    return res.status(500).json({ success: false, message: 'Server error fetching analytics', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Server error fetching analytics',
+      error: error.message,
+    });
   }
 };
 
@@ -143,14 +202,17 @@ const getFilteredStudentsForAdmin = async (req, res) => {
   try {
     const { department, yearOfStudy } = req.query;
 
-    // Fetch all student users and profiles to ensure legacy data is included
     const students = await User.find({ role: 'Student' }).select('-password').lean();
     const userIds = students.map((s) => s._id);
     const profiles = await StudentProfile.find({ user: { $in: userIds } }).lean();
 
-    // Map combined student objects with defaults for legacy records
+    const profileMap = new Map();
+    profiles.forEach((p) => {
+      if (p.user) profileMap.set(p.user.toString(), p);
+    });
+
     let combinedStudents = students.map((user) => {
-      const profile = profiles.find((p) => p.user?.toString() === user._id.toString()) || {};
+      const profile = profileMap.get(user._id.toString()) || {};
       return {
         _id: user._id,
         name: user.name,
@@ -160,7 +222,7 @@ const getFilteredStudentsForAdmin = async (req, res) => {
         yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
         cgpa: profile.cgpa ?? user.cgpa ?? null,
         attendance: profile.attendancePercentage ?? user.attendance ?? null,
-        surveyCompleted: profile.surveyCompleted ?? user.surveyCompleted ?? false,
+        surveyCompleted: Boolean(profile.surveyCompleted || user.surveyCompleted),
         riskLevel: profile.riskLevel || user.riskLevel || null,
       };
     });
@@ -185,7 +247,12 @@ const getFilteredStudentsForAdmin = async (req, res) => {
       students: combinedStudents,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Server error fetching students', error: error.message });
+    console.error('Error in getFilteredStudentsForAdmin:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error fetching students',
+      error: error.message,
+    });
   }
 };
 

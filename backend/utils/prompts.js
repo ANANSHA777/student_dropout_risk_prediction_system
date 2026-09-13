@@ -6,20 +6,27 @@
  * @param {Object|null} survey - Latest student self-survey response
  * @returns {String} Formatted prompt string for Gemini API
  */
-exports.buildRiskAnalysisPrompt = (student, qualitativeNotes = [], survey = null) => {
+exports.buildRiskAnalysisPrompt = (student = {}, qualitativeNotes = [], survey = null) => {
   // Format qualitative notes if available
-  const formattedNotes = qualitativeNotes.length > 0
-    ? qualitativeNotes.map(n => `- [${n.authorRole} | ${n.category}]: ${n.note}`).join('\n')
+  const formattedNotes = Array.isArray(qualitativeNotes) && qualitativeNotes.length > 0
+    ? qualitativeNotes.map(n => `- [${n?.authorRole || 'Staff'} | ${n?.category || 'General'}]: ${n?.note || ''}`).join('\n')
     : 'No qualitative notes recorded.';
+
+  // Safe academic metric fallbacks
+  const gpaVal = student.gpa ?? student.cgpa ?? 'N/A';
+  const attendanceVal = student.attendancePercentage ?? student.attendance ?? 'N/A';
+  const assignmentsSubmittedVal = student.assignmentsSubmitted ?? 'N/A';
+  const assignmentsTotalVal = student.assignmentsTotal ?? 'N/A';
+  const financialAidVal = student.financialAidStatus || student.financialAid || 'N/A';
 
   // Format student self-survey metrics
   const formattedSurvey = survey
     ? `
-      - Stress Level (1-5): ${survey.stressLevel || 'N/A'}
-      - Financial Stress Level (1-5): ${survey.financialStress || 'N/A'}
-      - Personal/Substance Usage: ${survey.personalSubstanceUsage || 'None reported'}
-      - Mental Health Self-Report: ${survey.mentalHealthSelfReport || 'N/A'}
-      - Additional Personal Notes: ${survey.additionalNotes || 'None'}
+      - Stress Level (1-5): ${survey.stressLevel ?? survey.stress ?? 'N/A'}
+      - Financial Stress Level (1-5): ${survey.financialStress ?? survey.moneyFeeWorries ?? 'N/A'}
+      - Personal/Substance Usage: ${survey.personalSubstanceUsage ?? (Array.isArray(survey.impactFactors) ? survey.impactFactors.join(', ') : 'None reported')}
+      - Mental Health Self-Report: ${survey.mentalHealthSelfReport ?? survey.mentalHealthState ?? 'N/A'}
+      - Additional Personal Notes: ${survey.additionalNotes ?? survey.qualitativeNotes ?? 'None'}
     `
     : 'No student self-survey submitted yet.';
 
@@ -28,10 +35,10 @@ You are an expert AI educational risk diagnostic engine. Analyze the following s
 
 ### STUDENT DATA
 1. **Academic Performance:**
-   - GPA: ${student.gpa} / 4.0
-   - Attendance Rate: ${student.attendancePercentage}%
-   - Assignments Submitted: ${student.assignmentsSubmitted} / ${student.assignmentsTotal}
-   - Financial Aid Status: ${student.financialAidStatus}
+   - GPA / CGPA: ${gpaVal}
+   - Attendance Rate: ${attendanceVal}%
+   - Assignments Submitted: ${assignmentsSubmittedVal} / ${assignmentsTotalVal}
+   - Financial Aid Status: ${financialAidVal}
 
 2. **Teacher & Counselor Qualitative Notes:**
 ${formattedNotes}
@@ -59,7 +66,7 @@ ${formattedSurvey}
 ---
 
 ### REQUIRED OUTPUT FORMAT:
-You MUST respond strictly with valid JSON. Do not include markdown code block backticks outside the raw JSON object.
+You MUST respond strictly with valid JSON matching the exact schema structure below. Do NOT include markdown code block backticks outside the raw JSON object.
 
 {
   "riskScore": 75,

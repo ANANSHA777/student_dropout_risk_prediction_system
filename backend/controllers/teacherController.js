@@ -1,5 +1,9 @@
+// backend/controllers/teacherController.js
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const StudentProfile = require('../models/StudentProfile');
+const CounselingSession = require('../models/CounselingSession');
+const { evaluateStudentRiskWithGemini } = require('../services/riskService');
 
 // @desc    Enroll / Create a new Student account & profile
 // @route   POST /api/teacher/students
@@ -96,12 +100,17 @@ exports.getTeacherStudents = async (req, res) => {
     const userIds = users.map((u) => u._id);
     const profiles = await StudentProfile.find({ user: { $in: userIds } }).lean();
 
+    const profileMap = new Map();
+    profiles.forEach((p) => {
+      if (p.user) profileMap.set(p.user.toString(), p);
+    });
+
     const combinedStudents = users.map((user) => {
-      const profile = profiles.find((p) => p.user?.toString() === user._id.toString()) || {};
+      const profile = profileMap.get(user._id.toString()) || {};
 
       const resolvedCgpa = profile.cgpa ?? user.cgpa ?? null;
       const resolvedAttendance = profile.attendancePercentage ?? profile.attendance ?? user.attendance ?? null;
-      const isSurveyDone = profile.surveyCompleted ?? user.surveyCompleted ?? false;
+      const isSurveyDone = Boolean(profile.surveyCompleted || user.surveyCompleted);
 
       // Evaluation button is enabled ONLY when CGPA, Attendance, AND Survey are present
       const canEvaluate = resolvedCgpa !== null && resolvedAttendance !== null && isSurveyDone === true;
@@ -120,7 +129,8 @@ exports.getTeacherStudents = async (req, res) => {
         canEvaluate, // Used by frontend to toggle AI Evaluation Button
         riskLevel: profile.riskLevel || user.riskLevel || null,
         riskCategory: profile.riskCategory || 'None',
-        assignedRole: profile.assignedRole || 'Unassigned',
+        primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
+        assignedRole: profile.assignedRole || 'TEACHER',
         aiRecommendations: profile.aiRecommendations || [],
         qualitativeNotes: profile.qualitativeNotes || [],
       };
@@ -149,8 +159,7 @@ exports.updateStudentMarks = async (req, res) => {
     const { id } = req.params;
     const { cgpa, marks, attendance, attendancePercentage, teacherNotes } = req.body;
 
-    const isObjectId = Boolean(id.match(/^[0-9a-fA-F]{24}$/));
-    if (!isObjectId) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: 'Invalid Student User ID' });
     }
 
@@ -233,7 +242,125 @@ exports.updateStudentMarks = async (req, res) => {
   }
 };
 
-// @desc    Trigger Weighted AI Risk Evaluation for a Student (Manual Trigger Only)
+// @desc    Get list of all registered counselors for assignment dropdown
+// @route   GET /api/teacher/counselors
+// @access  Private (Teacher, Admin)
+exports.getRegisteredCounselors = async (req, res) => {
+  try {
+    const counselors = await User.find({ role: 'Counselor' })
+      .select('_id name email department phone')
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: counselors.length,
+      counselors,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Assign a counselor from registered list to an at-risk student
+// @route   POST /api/teacher/students/:id/assign-counselor
+// @access  Private (Teacher, Admin)
+exports.assignCounselorToStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { counselorId, referralReason } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(counselorId)) {
+      return res.status(400).json({ success: false, message: 'Invalid Student or Counselor ID.' });
+    }
+
+    const counselor = await User.findOne({ _id: counselorId, role: 'Counselor' });
+    if (!counselor) {
+      return res.status(404).json({ success: false, message: 'Selected counselor not found.' });
+    }
+
+    const profile = await StudentProfile.findOneAndUpdate(
+      { user: id },
+      { 
+        $set: { 
+          assignedCounselor: counselor._id,
+          assignedRole: 'COUNSELOR'
+        } 
+      },
+      { new: true }
+    );
+
+    // Create tracking session record if CounselingSession model exists
+    let session = null;
+    if (CounselingSession) {
+      session = await CounselingSession.create({
+        student: id,
+        assignedBy: req.user?._id,
+        counselor: counselor._id,
+        riskCategory: profile?.riskCategory || 'General Intervention',
+        reasonForReferral: referralReason || 'Referred for specialized non-academic intervention.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully assigned Counselor ${counselor.name} to student.`,
+      session,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Alias handler for backwards-compatibility with route mappings
+exports.assignCounselor = exports.assignCounselorToStudent;
+
+// @desc    Submit application for College Emergency / Financial Aid Grant
+// @route   POST /api/teacher/students/:id/grant-aid
+// @access  Private (Teacher, Admin)
+exports.applyCollegeFinancialAid = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { requestedAmount, notes } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid Student ID.' });
+    }
+
+    const profile = await StudentProfile.findOneAndUpdate(
+      { user: id },
+      {
+        $set: {
+          'collegeFinancialAid.status': 'Approved',
+          'collegeFinancialAid.grantAmount': Number(requestedAmount) || 5000,
+          'collegeFinancialAid.approvedAt': new Date(),
+          assignedRole: 'FINANCIAL_AID',
+        },
+        $push: {
+          qualitativeNotes: {
+            authorRole: 'Teacher',
+            note: `Approved College Financial Aid Grant of ₹${requestedAmount || 5000}. Notes: ${notes || 'College aid disbursed.'}`,
+            category: 'Financial',
+            createdAt: new Date(),
+          }
+        }
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'College financial aid approved and allocated to student account.',
+      financialAid: profile?.collegeFinancialAid,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Alias handler for backwards-compatibility with route mappings
+exports.grantFinancialAid = exports.applyCollegeFinancialAid;
+
+// @desc    Trigger AI Risk Evaluation for a Student (Gemini Integration)
 // @route   POST /api/teacher/risk/evaluate
 // @access  Private (Teacher, Admin)
 exports.evaluateStudentRisk = async (req, res) => {
@@ -244,7 +371,7 @@ exports.evaluateStudentRisk = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
 
-    const isObjectId = Boolean(targetId.match(/^[0-9a-fA-F]{24}$/));
+    const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
 
     // 1. Fetch Student Profile and User Document
     let profile = await StudentProfile.findOne(
@@ -278,90 +405,45 @@ exports.evaluateStudentRisk = async (req, res) => {
       });
     }
 
-    // 3. Extract metrics with safe fallbacks
-    const cgpa = Number(profile.cgpa ?? user?.cgpa ?? 0);
-    const attendance = Number(profile.attendancePercentage ?? profile.attendance ?? user?.attendance ?? 0);
-    const backlogs = String(profile.activeBacklogs || '0');
+    // 3. Prepare payload for Gemini API evaluation
+    const evaluationPayload = {
+      cgpa: profile.cgpa ?? user?.cgpa ?? 0,
+      attendancePercentage: profile.attendancePercentage ?? user?.attendance ?? 0,
+      activeBacklogs: profile.activeBacklogs || '0 Backlogs',
+      surveyCompleted: profile.surveyCompleted,
+      academicInterest: profile.academicInterest,
+      disengagementReason: profile.disengagementReason,
+      abilityToStudy: profile.abilityToStudy,
+      financialStress: profile.financialStress || profile.moneyFeeWorries,
+      familyIncome: profile.familyIncome || profile.familyMonthlyIncome,
+      livingSituation: profile.livingSituation,
+      commuteTime: profile.commuteTime || profile.dailyCommuteTime,
+      partTimeJob: profile.partTimeJob || profile.partTimeWork,
+      studyHoursPerDay: profile.studyHoursPerDay || profile.dailySelfStudyHours,
+      sleepHoursPerNight: profile.sleepHoursPerNight || profile.nightlySleepHours,
+      mentalHealthSelfReport: profile.mentalHealthSelfReport || profile.mentalHealthState || profile.mentalHealthStatus,
+      addictions: profile.addictions || [],
+      impactFactors: profile.impactFactors || [],
+      qualitativeNotes: profile.qualitativeNotes || [],
+      comments: profile.comments || profile.additionalNotes,
+      surveyData: profile.surveyData || {},
+    };
 
-    const sData = profile.surveyData || {};
-    const financialStress = profile.financialStress || sData.moneyFeeWorries || 'Low';
-    const mentalHealth = profile.mentalHealthSelfReport || profile.mentalHealthState || sData.mentalHealthState || 'Good';
-    const addictions = profile.addictions || sData.impactFactors || [];
+    // 4. Delegate risk analysis to Gemini AI Service
+    const aiResult = await evaluateStudentRiskWithGemini(evaluationPayload);
 
-    // Weighted risk scoring
-    let academicRiskPoints = 0;
-    let financialRiskPoints = 0;
-    let wellnessRiskPoints = 0;
-
-    // A. ACADEMIC EVALUATION
-    if (cgpa > 0 && cgpa < 5.0) academicRiskPoints += 3;
-    else if (cgpa >= 5.0 && cgpa < 6.5) academicRiskPoints += 2;
-    else if (cgpa >= 6.5 && cgpa < 7.5) academicRiskPoints += 1;
-
-    if (attendance < 60) academicRiskPoints += 3;
-    else if (attendance >= 60 && attendance < 75) academicRiskPoints += 2;
-    else if (attendance >= 75 && attendance < 85) academicRiskPoints += 1;
-
-    if (backlogs === '> 4' || backlogs === '3-4') academicRiskPoints += 3;
-    else if (backlogs === '1-2') academicRiskPoints += 1.5;
-
-    // B. FINANCIAL EVALUATION
-    if (financialStress.toLowerCase().includes('high') || financialStress.toLowerCase().includes('severe')) {
-      financialRiskPoints += 3;
-    } else if (financialStress.toLowerCase().includes('moderate')) {
-      financialRiskPoints += 1;
-    }
-
-    // C. WELLNESS & LIFESTYLE EVALUATION
-    const mentalLower = mentalHealth.toLowerCase();
-    if (mentalLower.includes('burned out') || mentalLower.includes('depressed') || mentalLower.includes('overwhelmed')) {
-      wellnessRiskPoints += 3;
-    } else if (mentalLower.includes('anxious') || mentalLower.includes('stressed')) {
-      wellnessRiskPoints += 2;
-    }
-
-    if (Array.isArray(addictions) && addictions.some((item) => item.toLowerCase().includes('substance'))) {
-      wellnessRiskPoints += 3;
-    }
-
-    // 4. TOTAL RISK SCORE & CATEGORY ASSIGNMENT
-    const totalRiskScore = academicRiskPoints + financialRiskPoints + wellnessRiskPoints;
-
-    let calculatedRiskLevel = 'Low';
-    if (totalRiskScore >= 5 || academicRiskPoints >= 5 || wellnessRiskPoints >= 4) {
-      calculatedRiskLevel = 'High';
-    } else if (totalRiskScore >= 2.5) {
-      calculatedRiskLevel = 'Medium';
-    }
-
-    // Primary Risk Category Identification & Role Routing
-    let primaryRiskCategory = 'None';
-    let assignedRole = 'TEACHER'; // Default action handler
-
-    if (calculatedRiskLevel !== 'Low') {
-      const highestPoints = Math.max(academicRiskPoints, financialRiskPoints, wellnessRiskPoints);
-
-      if (highestPoints === academicRiskPoints) {
-        primaryRiskCategory = 'Academic Concern';
-        assignedRole = 'TEACHER'; // Teacher provides academic interventions
-      } else if (highestPoints === financialRiskPoints) {
-        primaryRiskCategory = 'Financial Burden';
-        assignedRole = 'COUNSELOR'; // Escalate to financial/student counselor
-      } else if (highestPoints === wellnessRiskPoints) {
-        primaryRiskCategory = 'Wellness & Mental Health';
-        assignedRole = 'COUNSELOR'; // Escalate to psychological counselor
-      }
-    }
-
-    // 5. Save updated risk evaluations to MongoDB
-    profile.riskLevel = calculatedRiskLevel;
-    profile.riskCategory = primaryRiskCategory;
-    profile.assignedRole = assignedRole;
+    // 5. Update Profile & User documents with standard AI results
+    profile.riskLevel = aiResult.riskLevel;
+    profile.riskCategory = aiResult.riskCategory;
+    profile.primaryRiskCategory = aiResult.primaryRiskCategory;
+    profile.assignedRole = aiResult.assignedRole;
+    profile.aiRecommendations = aiResult.aiRecommendations;
     profile.riskEvaluated = true;
+    profile.lastAiAnalysisDate = new Date();
     profile.lastEvaluatedAt = new Date();
 
     if (user) {
-      user.riskLevel = calculatedRiskLevel;
+      user.riskLevel = aiResult.riskLevel;
       await user.save();
     }
 
@@ -369,27 +451,16 @@ exports.evaluateStudentRisk = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `AI Evaluation complete. Student assigned to ${assignedRole} for ${primaryRiskCategory}.`,
-      riskLevel: calculatedRiskLevel,
-      riskCategory: primaryRiskCategory,
-      assignedRole,
+      message: `AI Evaluation completed successfully. Assigned to ${aiResult.assignedRole} for ${aiResult.riskCategory}.`,
       student: {
         _id: user?._id || profile.user,
-        riskLevel: calculatedRiskLevel,
-        riskCategory: primaryRiskCategory,
-        assignedRole,
+        riskLevel: profile.riskLevel,
+        riskCategory: profile.riskCategory,
+        primaryRiskCategory: profile.primaryRiskCategory,
+        assignedRole: profile.assignedRole,
+        aiRecommendations: profile.aiRecommendations,
       },
-      evaluation: {
-        riskLevel: calculatedRiskLevel,
-        riskCategory: primaryRiskCategory,
-        assignedRole,
-        totalRiskScore,
-        breakdown: {
-          academicRiskPoints,
-          financialRiskPoints,
-          wellnessRiskPoints,
-        },
-      },
+      evaluation: aiResult,
     });
   } catch (error) {
     console.error('Error evaluating risk:', error);
@@ -407,8 +478,7 @@ exports.deleteStudent = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const isObjectId = Boolean(id.match(/^[0-9a-fA-F]{24}$/));
-    if (!isObjectId) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: 'Invalid Student ID' });
     }
 

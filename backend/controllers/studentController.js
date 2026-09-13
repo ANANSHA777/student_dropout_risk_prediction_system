@@ -1,3 +1,4 @@
+// backend/controllers/studentController.js
 const mongoose = require('mongoose');
 const User = require('../models/User'); // Adjust path to models if needed
 const StudentProfile = require('../models/StudentProfile');
@@ -56,7 +57,11 @@ const normalizeImpactFactors = (rawFactors) => {
 // @access  Private (Student / Teacher)
 exports.getStudentProfile = async (req, res) => {
   try {
-    const rawUserId = req.user._id || req.user.id;
+    const rawUserId = req.user?._id || req.user?.id;
+    if (!rawUserId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized request: Missing user context' });
+    }
+
     const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
       ? new mongoose.Types.ObjectId(rawUserId)
       : rawUserId;
@@ -70,8 +75,8 @@ exports.getStudentProfile = async (req, res) => {
       return res.status(200).json({
         success: true,
         profile: {
-          name: user ? user.name : req.user.name,
-          email: user ? user.email : req.user.email,
+          name: user ? user.name : req.user?.name || 'Student',
+          email: user ? user.email : req.user?.email || '',
           attendancePercentage: null,
           cgpa: null,
           academicInterest: 'High (Interested & Motivated)',
@@ -89,12 +94,15 @@ exports.getStudentProfile = async (req, res) => {
 
     // Check if prerequisite conditions are met to enable the AI Evaluation Button on Frontend
     const hasTeacherMetrics = profile.cgpa !== null && profile.cgpa !== undefined &&
-                             profile.attendancePercentage !== null && profile.attendancePercentage !== undefined;
+                              profile.attendancePercentage !== null && profile.attendancePercentage !== undefined;
     const hasStudentSurvey = Boolean(profile.surveyCompleted);
     const canEvaluate = hasTeacherMetrics && hasStudentSurvey;
 
-    // Safely extract nested surveyData object
-    const sData = profile.surveyData || {};
+    // Safely extract nested surveyData object (handling Maps or plain JS Objects)
+    let sData = profile.surveyData || {};
+    if (sData instanceof Map) {
+      sData = Object.fromEntries(sData);
+    }
 
     // Reconstruct normalized survey values with fallbacks across flat and nested schemas
     const normalizedSurveyData = {
@@ -122,8 +130,8 @@ exports.getStudentProfile = async (req, res) => {
       success: true,
       profile: {
         ...profile,
-        name: req.user.name,
-        email: req.user.email,
+        name: req.user?.name || profile.name,
+        email: req.user?.email || profile.email,
         surveyCompleted: Boolean(profile.surveyCompleted),
         surveyStatus: profile.surveyCompleted ? 'Completed' : 'Pending',
         riskLevel: profile.riskLevel || 'Unevaluated',
@@ -152,7 +160,11 @@ exports.getStudentProfile = async (req, res) => {
 // @access  Private (Student)
 exports.submitStudentSurvey = async (req, res) => {
   try {
-    const rawUserId = req.user._id || req.user.id;
+    const rawUserId = req.user?._id || req.user?.id;
+    if (!rawUserId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized request: Missing user context' });
+    }
+
     const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
       ? new mongoose.Types.ObjectId(rawUserId)
       : rawUserId;
@@ -236,7 +248,7 @@ exports.submitStudentSurvey = async (req, res) => {
 
     // Check evaluate condition for frontend UI state
     const hasTeacherMetrics = updatedProfile.cgpa !== null && updatedProfile.cgpa !== undefined && 
-                             updatedProfile.attendancePercentage !== null && updatedProfile.attendancePercentage !== undefined;
+                              updatedProfile.attendancePercentage !== null && updatedProfile.attendancePercentage !== undefined;
     const canEvaluate = hasTeacherMetrics && true;
 
     // 3. Send normalized payload to prevent state mismatches in React
@@ -271,8 +283,15 @@ exports.submitStudentSurvey = async (req, res) => {
 // @access  Private (Teacher)
 exports.evaluateStudentRisk = async (req, res) => {
   try {
-    const { studentId } = req.body;
-    const profile = await StudentProfile.findById(studentId);
+    const { studentId, id } = req.body;
+    const targetId = studentId || id || req.params.id;
+
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required for evaluation.' });
+    }
+
+    const query = mongoose.Types.ObjectId.isValid(targetId) ? { _id: targetId } : { user: targetId };
+    const profile = await StudentProfile.findOne(query);
 
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Student profile not found.' });
@@ -280,7 +299,7 @@ exports.evaluateStudentRisk = async (req, res) => {
 
     // Require both Teacher Metrics and Student Survey to be present before evaluating
     const hasTeacherMetrics = profile.cgpa !== null && profile.cgpa !== undefined && 
-                             profile.attendancePercentage !== null && profile.attendancePercentage !== undefined;
+                              profile.attendancePercentage !== null && profile.attendancePercentage !== undefined;
     const hasStudentSurvey = profile.surveyCompleted === true;
 
     if (!hasTeacherMetrics || !hasStudentSurvey) {
@@ -291,33 +310,37 @@ exports.evaluateStudentRisk = async (req, res) => {
     }
 
     // Core Risk Classification Engine
-    let riskLevel = 'Low';
+    let riskLevel = 'Low Risk';
     let riskCategory = 'None';
     let assignedRole = 'TEACHER'; // 'TEACHER' for academic, 'COUNSELOR' for non-academic issues
 
     const cgpa = profile.cgpa || 0;
     const attendance = profile.attendancePercentage || 0;
-    const sData = profile.surveyData || {};
+    
+    let sData = profile.surveyData || {};
+    if (sData instanceof Map) {
+      sData = Object.fromEntries(sData);
+    }
 
-    const mentalHealth = (sData.mentalHealthState || profile.mentalHealthState || '').toLowerCase();
+    const mentalHealth = (sData.mentalHealthState || profile.mentalHealthState || profile.mentalHealthSelfReport || '').toLowerCase();
     const financial = (sData.moneyFeeWorries || profile.financialStress || '').toLowerCase();
     const interest = (sData.academicInterest || profile.academicInterest || '').toLowerCase();
 
     // 1. Academic Risk Checks
     if (cgpa < 6.0 || attendance < 75 || interest.includes('low') || interest.includes('disengaged')) {
-      riskLevel = cgpa < 4.5 || attendance < 60 ? 'High' : 'Medium';
+      riskLevel = (cgpa < 4.5 || attendance < 60) ? 'High Risk' : 'Medium Risk';
       riskCategory = 'Academic Disengagement';
       assignedRole = 'TEACHER'; // Academic interventions assigned directly to teacher
     } 
     // 2. Wellness / Mental Health Risk Checks
     else if (mentalHealth.includes('anxious') || mentalHealth.includes('overwhelmed') || mentalHealth.includes('stressed')) {
-      riskLevel = 'Medium';
+      riskLevel = 'Medium Risk';
       riskCategory = 'Wellness & Mental Health';
       assignedRole = 'COUNSELOR'; // Route to Counselor
     } 
     // 3. Financial Risk Checks
     else if (financial.includes('high') || financial.includes('severe') || financial.includes('burden')) {
-      riskLevel = 'Medium';
+      riskLevel = 'Medium Risk';
       riskCategory = 'Financial Burden';
       assignedRole = 'COUNSELOR'; // Route to Counselor / Admin
     }
@@ -327,11 +350,13 @@ exports.evaluateStudentRisk = async (req, res) => {
     profile.riskCategory = riskCategory;
     profile.riskEvaluated = true;
     profile.evaluatedAt = new Date();
+    profile.lastEvaluatedAt = new Date();
     profile.assignedRole = assignedRole;
 
     profile.recommendedActions = {
       assignTeacherMentor: assignedRole === 'TEACHER',
       escalateToCounselor: assignedRole === 'COUNSELOR',
+      assignCounselor: assignedRole === 'COUNSELOR',
     };
 
     await profile.save();

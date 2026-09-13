@@ -9,6 +9,7 @@ const surveySchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+
     // Academic & Study Metrics
     academicInterest: {
       type: String,
@@ -30,6 +31,10 @@ const surveySchema = new mongoose.Schema(
       type: String,
       default: '3 - 5 hours',
     },
+    activeBacklogs: {
+      type: String,
+      default: '0 Backlogs',
+    },
 
     // Stress & Financial Metrics
     stressLevel: {
@@ -44,8 +49,46 @@ const surveySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: 'Low (No issue)',
     },
+    familyIncome: {
+      type: String,
+      default: 'Above ₹60,000',
+    },
+    familyMonthlyIncome: {
+      type: String,
+      default: 'Above ₹60,000',
+    },
 
-    // Personal & Mental Health Metrics
+    // Commute & Environment Metrics
+    commuteTime: {
+      type: String,
+      default: 'Less than 30 mins',
+    },
+    dailyCommuteTime: {
+      type: String,
+      default: 'Less than 30 mins',
+    },
+    livingSituation: {
+      type: String,
+      default: 'Campus Hostel',
+    },
+    partTimeJob: {
+      type: String,
+      default: 'No Job',
+    },
+    partTimeWork: {
+      type: String,
+      default: 'No Job',
+    },
+
+    // Personal, Wellness & Sleep Metrics
+    sleepHoursPerNight: {
+      type: String,
+      default: '5 - 6 hours',
+    },
+    nightlySleepHours: {
+      type: String,
+      default: '5 - 6 hours',
+    },
     personalSubstanceUsage: {
       type: String,
       default: 'None',

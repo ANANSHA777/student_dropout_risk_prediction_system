@@ -31,25 +31,26 @@ const userSchema = new mongoose.Schema(
       enum: ['Admin', 'Counselor', 'Teacher', 'Student'],
       default: 'Student',
     },
-    // Custom Student Roll / Registration ID (e.g., CS2026-001)
-    studentId: {
-      type: String,
-      trim: true,
-      default: '',
-    },
     department: {
       type: String,
       required: [true, 'Please specify a department'],
       default: 'Computer Science',
       trim: true,
     },
-    // Student Year Level
+    isFirstLogin: {
+      type: Boolean,
+      default: true,
+    },
+
+    // --- STUDENT-ONLY FIELDS ---
+    studentId: {
+      type: String,
+      trim: true,
+    },
     yearOfStudy: {
       type: String,
       enum: ['1st Year', '2nd Year', '3rd Year', '4th Year'],
-      default: '1st Year',
     },
-    // Academic Records
     cgpa: {
       type: Number,
       default: null,
@@ -62,19 +63,53 @@ const userSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
-    // Student Survey Completion Status
     surveyCompleted: {
+      type: Boolean,
+    },
+
+    // --- EVALUATION & INTERVENTION FIELDS ---
+    riskEvaluated: {
       type: Boolean,
       default: false,
     },
-    // Risk assessment status (null = Not Evaluated)
     riskLevel: {
       type: String,
       default: null,
     },
-    isFirstLogin: {
-      type: Boolean,
-      default: true,
+    riskCategory: {
+      type: String,
+      default: 'None',
+    },
+    primaryRiskCategory: {
+      type: String,
+      enum: [
+        'ACADEMIC',
+        'ATTENDANCE',
+        'FINANCIAL',
+        'PERSONAL',
+        'WELLNESS',
+        'DUAL',
+        'NONE',
+        'Dual Risk (Academic + Personal)',
+        'Academic Risk Only',
+        'Personal / Financial Risk',
+        'No Policy Risk',
+      ],
+      default: 'NONE',
+    },
+    assignedCounselor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    assignedPlan: {
+      type: String,
+      default: null,
+    },
+    financialAidStatus: {
+      type: String,
+      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested'],
+      default: 'Paid',
     },
   },
   {
@@ -82,11 +117,39 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving
+// Pre-save Middleware: Async style without `next`
 userSchema.pre('save', async function () {
+  // 1. Sanitize Non-Student Accounts
+  if (this.role !== 'Student') {
+    this.studentId = undefined;
+    this.yearOfStudy = undefined;
+    this.cgpa = undefined;
+    this.attendance = undefined;
+    this.surveyCompleted = undefined;
+    this.riskLevel = undefined;
+    this.riskEvaluated = undefined;
+    this.riskCategory = undefined;
+    this.primaryRiskCategory = undefined;
+    this.assignedCounselor = undefined;
+    this.assignedPlan = undefined;
+    this.financialAidStatus = undefined;
+  } else {
+    // Default assignments for actual Student accounts
+    if (this.surveyCompleted === undefined) this.surveyCompleted = false;
+    if (!this.yearOfStudy) this.yearOfStudy = '1st Year';
+    if (this.studentId === undefined) this.studentId = '';
+  }
+
+  // 2. Password Hashing Guard
   if (!this.isModified('password')) {
     return;
   }
+
+  // Skip hashing if password is already a bcrypt hash
+  if (this.password.startsWith('$2b$') || this.password.startsWith('$2a$')) {
+    return;
+  }
+
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
@@ -95,5 +158,16 @@ userSchema.pre('save', async function () {
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
+
+// Virtual getter mapping `_id` to `id` for standardized API JSON returns
+userSchema.set('toJSON', {
+  virtuals: true,
+  transform: (doc, ret) => {
+    ret.id = ret._id;
+    delete ret.password;
+    delete ret.__v;
+    return ret;
+  },
+});
 
 module.exports = mongoose.model('User', userSchema);

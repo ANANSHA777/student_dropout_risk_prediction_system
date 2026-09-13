@@ -8,24 +8,38 @@ const { evaluateStudentRiskWithGemini } = require('../services/riskService');
 // @access  Private (Teacher, Counselor, Admin)
 exports.evaluateStudentRisk = async (req, res) => {
   try {
-    const { studentId, surveyData: incomingSurvey } = req.body;
+    const { studentId, id, surveyData: incomingSurvey } = req.body;
+    const targetId = studentId || id || req.params.id || req.params.studentId;
 
-    if (!studentId) {
+    if (!targetId) {
       return res.status(400).json({ success: false, message: 'Student ID is required' });
     }
 
     // 1. Fetch User Document
-    const query = studentId.match(/^[0-9a-fA-F]{24}$/) ? { _id: studentId } : { studentId };
+    const query = targetId.match(/^[0-9a-fA-F]{24}$/) ? { _id: targetId } : { studentId: targetId };
     const user = await User.findOne(query).select('-password');
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'Student user not found' });
     }
 
-    // 2. Fetch Profile Document
+    // 2. Fetch or initialize StudentProfile Document
     let profile = await StudentProfile.findOne({ user: user._id });
     if (!profile) {
       profile = new StudentProfile({ user: user._id });
+    }
+
+    // Sync incoming survey data into student profile memory & DB
+    if (incomingSurvey && typeof incomingSurvey === 'object') {
+      if (!profile.surveyData) profile.surveyData = new Map();
+      
+      Object.entries(incomingSurvey).forEach(([k, v]) => {
+        if (profile.surveyData instanceof Map) {
+          profile.surveyData.set(k, v);
+        } else {
+          profile.surveyData[k] = v;
+        }
+      });
     }
 
     // 3. Extract surveyData cleanly handling Mongoose Maps, plain Objects, and Request Body
@@ -52,24 +66,24 @@ exports.evaluateStudentRisk = async (req, res) => {
     const attendancePercentage = profile.attendancePercentage ?? profile.attendance ?? getField('attendancePercentage', 'attendance');
 
     // Extract All Survey Factors
-    const academicInterest = getField('academicInterest', 'interest') || 'Not Provided';
-    const abilityToStudy = getField('abilityToStudy', 'studyEnvironment') || 'Not Provided';
-    const familyMonthlyIncome = getField('familyMonthlyIncome', 'familyIncome') || 'Not Provided';
-    const moneyFeeWorries = getField('moneyFeeWorries', 'financialStress', 'financialStatus') || 'Not Provided';
-    const livingSituation = getField('livingSituation', 'residence') || 'Not Provided';
-    const partTimeWork = getField('partTimeWork', 'partTimeJob') || 'Not Provided';
+    const academicInterest = getField('academicInterest', 'interest', 'motivationLevel') || 'Not Provided';
+    const abilityToStudy = getField('abilityToStudy', 'studyEnvironment', 'studyAbility') || 'Not Provided';
+    const familyMonthlyIncome = getField('familyMonthlyIncome', 'familyIncome', 'income') || 'Not Provided';
+    const moneyFeeWorries = getField('moneyFeeWorries', 'financialStress', 'financialStatus', 'feeWorries') || 'Not Provided';
+    const livingSituation = getField('livingSituation', 'residence', 'housing') || 'Not Provided';
+    const partTimeWork = getField('partTimeWork', 'partTimeJob', 'workHours') || 'Not Provided';
     const dailySelfStudyHours = getField('dailySelfStudyHours', 'studyHoursPerDay', 'studyHours') || 'Not Provided';
-    const dailyCommuteTime = getField('dailyCommuteTime', 'commuteTime') || 'Not Provided';
-    const activeBacklogs = getField('activeBacklogs', 'backlogs') || 'Not Provided';
-    const nightlySleepHours = getField('nightlySleepHours', 'sleepHoursPerNight', 'sleepHours') || 'Not Provided';
+    const dailyCommuteTime = getField('dailyCommuteTime', 'commuteTime', 'commute') || 'Not Provided';
+    const activeBacklogs = getField('activeBacklogs', 'backlogs', 'failedSubjects') || 'Not Provided';
+    const nightlySleepHours = getField('nightlySleepHours', 'sleepHoursPerNight', 'sleepHours', 'sleep') || 'Not Provided';
     const mentalHealthState = getField('mentalHealthState', 'mentalHealthSelfReport', 'mentalHealthStatus', 'mentalHealth') || 'Not Provided';
     
-    let impactFactors = getField('impactFactors', 'addictions') || [];
+    let impactFactors = getField('impactFactors', 'addictions', 'distractions') || [];
     if (typeof impactFactors === 'string') impactFactors = [impactFactors];
 
-    console.log(`[AI EVALUATION] Student: ${user.name} (${studentId})`);
-    console.log(`[AI EVALUATION] Extracted Mental Health: "${mentalHealthState}"`);
-    console.log(`[AI EVALUATION] Extracted Interest: "${academicInterest}" | Study Ability: "${abilityToStudy}"`);
+    console.log(`[AI EVALUATION] Student: ${user.name} (${user._id})`);
+    console.log(`[AI EVALUATION] Mental Health: "${mentalHealthState}" | Financial: "${moneyFeeWorries}"`);
+    console.log(`[AI EVALUATION] Interest: "${academicInterest}" | Study Ability: "${abilityToStudy}"`);
 
     // 4. Construct Payload for AI Service
     const evaluationPayload = {
@@ -81,23 +95,26 @@ exports.evaluateStudentRisk = async (req, res) => {
       qualitativeNotes: profile.qualitativeNotes || [],
     };
 
-    // 5. Run AI Assessment
+    // 5. Run AI Assessment via Gemini Service with Fallback
     let aiAssessment = { riskLevel: 'Low Risk', riskCategory: 'None', aiRecommendations: [] };
     try {
-      aiAssessment = await evaluateStudentRiskWithGemini(evaluationPayload);
+      if (typeof evaluateStudentRiskWithGemini === 'function') {
+        aiAssessment = await evaluateStudentRiskWithGemini(evaluationPayload);
+      }
     } catch (aiErr) {
-      console.warn('[AI EVALUATION] Gemini API error, applying safeguard rules:', aiErr.message);
+      console.warn('[AI EVALUATION] Gemini API warning, applying local safeguards:', aiErr.message);
     }
 
     let finalRiskLevel = aiAssessment.riskLevel || 'Low Risk';
     let finalRiskCategory = aiAssessment.riskCategory || 'None';
 
-    // Normalize String Format
-    if (String(finalRiskLevel).toLowerCase().includes('low')) finalRiskLevel = 'Low Risk';
-    if (String(finalRiskLevel).toLowerCase().includes('medium')) finalRiskLevel = 'Medium Risk';
-    if (String(finalRiskLevel).toLowerCase().includes('high')) finalRiskLevel = 'High Risk';
+    // Standardize Risk Level Formatting
+    const lowerLevel = String(finalRiskLevel).toLowerCase();
+    if (lowerLevel.includes('low')) finalRiskLevel = 'Low Risk';
+    if (lowerLevel.includes('medium')) finalRiskLevel = 'Medium Risk';
+    if (lowerLevel.includes('high')) finalRiskLevel = 'High Risk';
 
-    // 6. SAFEGUARD RULE ENGINE
+    // 6. SAFEGUARD RULE ENGINE (Rules apply on top of AI results)
     const mentalLower = String(mentalHealthState).toLowerCase();
     const financialLower = String(moneyFeeWorries).toLowerCase();
     const interestLower = String(academicInterest).toLowerCase();
@@ -149,7 +166,7 @@ exports.evaluateStudentRisk = async (req, res) => {
       impactString.includes('social media') ||
       impactString.includes('addiction');
 
-    // Priority Categorization Logic
+    // Categorization Priority Rules
     if (isPoorMentalHealth || hasBehavioralRisk) {
       finalRiskCategory = isPoorAcademic ? 'Academic & Mental Health Concern' : 'Wellness & Mental Health';
       if (finalRiskLevel === 'Low Risk') finalRiskLevel = 'Medium Risk';
@@ -180,11 +197,11 @@ exports.evaluateStudentRisk = async (req, res) => {
       finalRiskCategory.includes('Academic') ? 'ACADEMIC' : 'NONE';
 
     profile.riskEvaluated = true;
-    profile.aiRecommendations = aiAssessment.aiRecommendations || [];
+    profile.aiRecommendations = aiAssessment.aiRecommendations || profile.aiRecommendations || [];
     profile.lastEvaluatedAt = new Date();
     profile.lastAiAnalysisDate = new Date();
 
-    // 8. Action Flags Assignment (Guarantees Counselor for Disinterested students)
+    // 8. Action Flags Assignment
     const isCounselorRequired =
       isPoorMentalHealth ||
       isPoorFinancial ||
@@ -209,7 +226,7 @@ exports.evaluateStudentRisk = async (req, res) => {
 
     console.log(`[AI EVALUATION COMPLETE] Level: ${finalRiskLevel} | Category: ${finalRiskCategory} | Counselor Escalation: ${isCounselorRequired}`);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'Student risk evaluated with all survey details',
       assessment: {
@@ -228,7 +245,7 @@ exports.evaluateStudentRisk = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in evaluateStudentRisk:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to process AI risk evaluation',
       error: error.message,

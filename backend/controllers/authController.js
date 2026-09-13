@@ -34,7 +34,7 @@ exports.register = async (req, res) => {
     const assignedStudentId = studentId ? studentId.trim() : '';
     const assignedYear = yearOfStudy ? yearOfStudy.trim() : '1st Year';
 
-    // 1. Password gets hashed automatically in User schema pre-save hook
+    // 1. Create User instance (Password gets hashed automatically in User schema pre-save hook)
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
@@ -46,14 +46,16 @@ exports.register = async (req, res) => {
       cgpa: null,
       attendance: null,
       surveyCompleted: false,
-      riskLevel: null, // Initialized to null for "Not Evaluated"
+      riskLevel: null, // Initialized to null for "Unevaluated"
     });
 
     // 2. Automatically create linked StudentProfile for Student role
     if (assignedRole === 'Student') {
+      const generatedStudentId = assignedStudentId || `STU-${user._id.toString().slice(-4)}`;
+      
       await StudentProfile.create({
         user: user._id,
-        studentId: assignedStudentId || `STU-${user._id.toString().slice(-4)}`,
+        studentId: generatedStudentId,
         department: assignedDept,
         yearOfStudy: assignedYear,
         cgpa: null,
@@ -61,6 +63,12 @@ exports.register = async (req, res) => {
         surveyCompleted: false,
         riskLevel: null,
       });
+
+      // Keep studentId synced on User model if auto-generated
+      if (!assignedStudentId) {
+        user.studentId = generatedStudentId;
+        await user.save();
+      }
     }
 
     const token = generateToken(user._id);
@@ -113,8 +121,14 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Schema pre-save method handles comparison
-    const isMatch = await user.matchPassword(password);
+    // Schema pre-save method handles comparison fallback safely
+    let isMatch = false;
+    if (typeof user.matchPassword === 'function') {
+      isMatch = await user.matchPassword(password);
+    } else {
+      isMatch = await bcrypt.compare(password, user.password);
+    }
+
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -153,10 +167,16 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized access: Invalid token payload' });
+    }
+
+    const user = await User.findById(userId).select('-password');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+
     res.status(200).json({ 
       success: true, 
       user, 
@@ -173,19 +193,29 @@ exports.getMe = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    const userId = req.user.id;
+    const userId = req.user?._id || req.user?.id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Please provide both current and new password' });
+    }
 
     // Fetch user with password field included
     const user = await User.findById(userId).select('+password');
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     // Verify existing password
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    let isMatch = false;
+    if (typeof user.matchPassword === 'function') {
+      isMatch = await user.matchPassword(currentPassword);
+    } else {
+      isMatch = await bcrypt.compare(currentPassword, user.password);
+    }
+
     if (!isMatch) {
       return res.status(400).json({ message: 'Incorrect current password' });
     }
 
-    // Pre-save hook handles hashing
+    // Assigning new password triggers the schema pre-save hook for hashing
     user.password = newPassword;
     await user.save();
 

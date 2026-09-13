@@ -1,113 +1,88 @@
+// backend/routes/teacherRoutes.js
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const User = require('../models/User'); // Adjust path to your User model
-const { protect, authorize } = require('../middleware/authMiddleware');
+const User = require('../models/User');
+const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/roleMiddleware');
+const teacherController = require('../controllers/teacherController');
 
-// Import Teacher Controllers
-const {
-  getTeacherStudents,
-  updateStudentMarks,
-  createStudent,
-  deleteStudent,
-  evaluateStudentRisk,
-} = require('../controllers/teacherController');
+// Clean helper fallbacks in case specific controller exports are missing
+const getTeacherStudents = teacherController.getTeacherStudents || ((req, res) => res.status(501).json({ success: false, message: 'getTeacherStudents controller missing' }));
+const createStudent = teacherController.createStudent || ((req, res) => res.status(501).json({ success: false, message: 'createStudent controller missing' }));
+const updateStudentMarks = teacherController.updateStudentMarks || ((req, res) => res.status(501).json({ success: false, message: 'updateStudentMarks controller missing' }));
+const evaluateStudentRisk = teacherController.evaluateStudentRisk || ((req, res) => res.status(501).json({ success: false, message: 'evaluateStudentRisk controller missing' }));
+const getRegisteredCounselors = teacherController.getRegisteredCounselors || ((req, res) => res.status(501).json({ success: false, message: 'getRegisteredCounselors controller missing' }));
+const assignCounselorToStudent = teacherController.assignCounselorToStudent || teacherController.assignCounselor || ((req, res) => res.status(501).json({ success: false, message: 'assignCounselorToStudent controller missing' }));
+const applyCollegeFinancialAid = teacherController.applyCollegeFinancialAid || teacherController.grantFinancialAid || ((req, res) => res.status(501).json({ success: false, message: 'applyCollegeFinancialAid controller missing' }));
+const deleteStudent = teacherController.deleteStudent || ((req, res) => res.status(501).json({ success: false, message: 'deleteStudent controller missing' }));
 
-// Debug check on server startup
-console.log({
-  protect,
-  authorize,
-  getTeacherStudents,
-  updateStudentMarks,
-  createStudent,
-  deleteStudent,
-  evaluateStudentRisk,
-});
+// Secure all teacher routes for Teachers and Admins
+router.use(protect);
+router.use(authorize('Teacher', 'Admin'));
 
 // ==========================================
-// STUDENT MANAGEMENT ROUTES
+// STUDENT MANAGEMENT & MARKS ROUTES
 // ==========================================
-
-// GET /api/teacher/students - Fetch class roster
-router.get('/students', protect, authorize('Teacher', 'Admin'), getTeacherStudents);
-
-// POST /api/teacher/students - Register a new student manually
-router.post('/students', protect, authorize('Teacher', 'Admin'), createStudent);
-
-// PUT & POST /api/teacher/students/:id/marks - Update marks & attendance
-router.put('/students/:id/marks', protect, authorize('Teacher', 'Admin'), updateStudentMarks);
-router.post('/students/:id/marks', protect, authorize('Teacher', 'Admin'), updateStudentMarks);
-
-// AI RISK EVALUATION ROUTES (Multiple route aliases for full frontend compatibility)
-router.post('/evaluate-risk/:studentId', protect, authorize('Teacher', 'Admin'), evaluateStudentRisk);
-router.post('/students/:id/evaluate', protect, authorize('Teacher', 'Admin'), evaluateStudentRisk);
-router.post('/risk/evaluate', protect, authorize('Teacher', 'Admin'), evaluateStudentRisk);
-
-// DELETE /api/teacher/students/:id - Remove a student
-router.delete('/students/:id', protect, authorize('Teacher', 'Admin'), async (req, res, next) => {
-  if (deleteStudent) {
-    return deleteStudent(req, res, next);
-  }
-  
-  // Inline fallback if deleteStudent controller is not defined
-  try {
-    const student = await User.findByIdAndDelete(req.params.id);
-    if (!student) return res.status(404).json({ message: 'Student not found' });
-    return res.status(200).json({ message: 'Student deleted successfully' });
-  } catch (err) {
-    return res.status(500).json({ message: err.message || 'Error deleting student' });
-  }
-});
+router.get('/students', getTeacherStudents);
+router.post('/students', createStudent);
+router.put('/students/:id/marks', updateStudentMarks);
+router.post('/students/:id/marks', updateStudentMarks);
+router.delete('/students/:id', deleteStudent);
 
 // ==========================================
-// ACCOUNT ROUTES
+// AI RISK EVALUATION ROUTES
 // ==========================================
+router.post('/risk/evaluate', evaluateStudentRisk);
+router.post('/evaluate-risk/:studentId', evaluateStudentRisk);
+router.post('/students/:id/evaluate', evaluateStudentRisk);
 
-// POST /api/teacher/change-password - Change Teacher Password
-router.post('/change-password', protect, async (req, res) => {
+// ==========================================
+// COUNSELOR ASSIGNMENT & FINANCIAL AID ROUTES
+// ==========================================
+router.get('/counselors', getRegisteredCounselors);
+router.post('/students/:id/assign-counselor', assignCounselorToStudent);
+router.post('/students/:id/grant-aid', applyCollegeFinancialAid);
+router.post('/students/:id/grant-financial-aid', applyCollegeFinancialAid); // Alias for frontend compatibility
+
+// ==========================================
+// TEACHER ACCOUNT ROUTES
+// ==========================================
+router.post('/change-password', async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
 
-    // 1. Validate incoming body payload
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: 'Both current password and new password are required' });
+      return res.status(400).json({ success: false, message: 'Both current password and new password are required.' });
     }
 
     if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long.' });
     }
 
-    // 2. Extract user ID from authenticated JWT payload
     const userId = req.user?._id || req.user?.id;
     if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized access' });
+      return res.status(401).json({ success: false, message: 'Unauthorized access.' });
     }
 
-    // 3. Explicitly select '+password' to bypass 'select: false' in Mongoose schemas
     const user = await User.findById(userId).select('+password');
-    if (!user) {
-      return res.status(404).json({ message: 'User account not found' });
+    if (!user || !user.password) {
+      return res.status(404).json({ success: false, message: 'User account not found.' });
     }
 
-    if (!user.password) {
-      return res.status(500).json({ message: 'Unable to retrieve password hash from database' });
-    }
-
-    // 4. Safely perform bcrypt comparison
     const isMatch = await bcrypt.compare(String(currentPassword), String(user.password));
     if (!isMatch) {
-      return res.status(400).json({ message: 'Incorrect current password' });
+      return res.status(400).json({ success: false, message: 'Incorrect current password.' });
     }
 
-    // 5. Hash and save new password
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(String(newPassword), salt);
     await user.save();
 
-    return res.status(200).json({ message: 'Password updated successfully' });
+    return res.status(200).json({ success: true, message: 'Password updated successfully.' });
   } catch (err) {
     console.error('Error changing password:', err);
-    return res.status(500).json({ message: err.message || 'Server error updating password' });
+    return res.status(500).json({ success: false, message: err.message || 'Server error updating password.' });
   }
 });
 

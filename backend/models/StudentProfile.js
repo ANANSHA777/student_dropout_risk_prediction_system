@@ -56,6 +56,18 @@ const studentProfileSchema = new mongoose.Schema(
       type: String, 
       default: 'High (Interested & Motivated)' 
     },
+    disengagementReason: { 
+      type: String, 
+      enum: [
+        'Mental Health Burden', 
+        'Financial Stress', 
+        'Low Study Interest', 
+        'Substance Impact', 
+        'Personal/Family Issue', 
+        'None'
+      ], 
+      default: 'None' 
+    },
     abilityToStudy: { 
       type: String, 
       default: 'Full (Good Environment & Focus)' 
@@ -159,14 +171,29 @@ const studentProfileSchema = new mongoose.Schema(
     },
     financialAidStatus: {
       type: String,
-      enum: ['Paid', 'Pending', 'Emergency Assistance Requested'],
+      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Approved', 'Not Applied'],
       default: 'Paid',
+    },
+    financialAidGrant: {
+      amount: { type: Number, default: 0 },
+      reason: { type: String, default: '' },
+      grantedAt: { type: Date },
+    },
+    collegeFinancialAid: {
+      status: { 
+        type: String, 
+        enum: ['Not Applied', 'Pending Review', 'Approved', 'Rejected'], 
+        default: 'Not Applied' 
+      },
+      grantAmount: { type: Number, default: 0 },
+      appliedAt: { type: Date },
+      approvedAt: { type: Date },
     },
     qualitativeNotes: [
       {
         authorRole: {
           type: String,
-          enum: ['Teacher', 'Counselor'],
+          enum: ['Teacher', 'Counselor', 'Admin'],
           default: 'Teacher',
         },
         note: {
@@ -175,7 +202,7 @@ const studentProfileSchema = new mongoose.Schema(
         },
         category: {
           type: String,
-          enum: ['Academic', 'Financial', 'Personal', 'Health'],
+          enum: ['Academic', 'Financial', 'Personal', 'Health', 'Wellness', 'General'],
           default: 'Academic',
         },
         createdAt: {
@@ -205,9 +232,46 @@ const studentProfileSchema = new mongoose.Schema(
     },
     primaryRiskCategory: {
       type: String,
-      enum: ['ACADEMIC', 'ATTENDANCE', 'FINANCIAL', 'PERSONAL', 'WELLNESS', 'DUAL', 'NONE'],
+      enum: [
+        'ACADEMIC',
+        'ATTENDANCE',
+        'FINANCIAL',
+        'PERSONAL',
+        'WELLNESS',
+        'DISENGAGEMENT',
+        'DUAL',
+        'NONE',
+        'Dual Risk (Academic + Personal)',
+        'Academic Risk Only',
+        'Personal / Financial Risk',
+        'No Policy Risk',
+      ],
       default: 'NONE',
       index: true,
+    },
+    assignedRole: {
+      type: String,
+      enum: ['TEACHER', 'COUNSELOR', 'FINANCIAL_AID'],
+      default: 'TEACHER',
+    },
+
+    // --- ASSIGNED INTERVENTIONS & COUNSELING ---
+    assignedCounselor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    assignedPlan: {
+      type: String,
+      default: null,
+    },
+    assignedAcademicPlan: {
+      type: String,
+      default: null,
+    },
+    academicPlan: {
+      type: String,
+      default: null,
     },
 
     // --- AUTOMATED ACTION FLAGS ---
@@ -228,9 +292,17 @@ const studentProfileSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      grantFinancialAid: {
+        type: Boolean,
+        default: false,
+      },
     },
 
+    aiRecommendations: [{ type: String }],
     lastAiAnalysisDate: {
+      type: Date,
+    },
+    lastEvaluatedAt: {
       type: Date,
     },
   },

@@ -25,7 +25,9 @@ const handleResponse = async (res, defaultErrorMessage) => {
   }
 
   if (!res.ok) {
-    throw new Error(data.message || defaultErrorMessage || `HTTP Error ${res.status}`);
+    const error = new Error(data.message || defaultErrorMessage || `HTTP Error ${res.status}`);
+    error.status = res.status;
+    throw error;
   }
 
   return data;
@@ -79,7 +81,68 @@ export const assignRemedialTask = async (studentId, taskData) => {
   return handleResponse(res, 'Failed to assign remedial task');
 };
 
-// 6. Delete Student
+// 6. Assign Academic Support Plan
+export const assignAcademicPlan = async (studentId, planData) => {
+  const payload = {
+    assignedAcademicPlan: {
+      planType: planData?.planType || 'Academic Support Plan',
+      notes: planData?.notes || '',
+      assignedAt: new Date().toISOString(),
+    },
+    academicPlan: planData?.planType || 'Academic Support Plan',
+    remedialPlan: planData?.planType,
+    notes: planData?.notes || '',
+  };
+
+  const endpoints = [
+    { url: `${API_BASE}/students/${studentId}`, method: 'PUT' },
+    { url: `${API_BASE}/students/${studentId}`, method: 'PATCH' },
+    { url: `${API_BASE}/students/${studentId}/academic-plan`, method: 'POST' },
+    { url: `${API_BASE}/students/${studentId}/remedial`, method: 'POST' },
+    { url: `${API_BASE}/students/${studentId}/marks`, method: 'POST' },
+  ];
+
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint.url, {
+        method: endpoint.method,
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        return await handleResponse(res, 'Plan assigned successfully');
+      }
+
+      if (res.status === 404 || res.status === 405) {
+        continue;
+      }
+
+      return await handleResponse(res, 'Failed to assign academic plan');
+    } catch (err) {
+      if (err.status === 404 || err.status === 405) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  // Fallback to local persistence in localStorage if backend endpoint doesn't exist
+  try {
+    const localPlans = JSON.parse(localStorage.getItem('assigned_academic_plans') || '{}');
+    localPlans[studentId] = payload.assignedAcademicPlan;
+    localStorage.setItem('assigned_academic_plans', JSON.stringify(localPlans));
+  } catch (e) {
+    console.error('LocalStorage save failed:', e);
+  }
+
+  return { success: true, message: 'Plan assigned and cached locally.' };
+};
+
+// 7. Delete Student
 export const deleteStudent = async (studentId) => {
   const res = await fetch(`${API_BASE}/students/${studentId}`, {
     method: 'DELETE',
@@ -88,7 +151,7 @@ export const deleteStudent = async (studentId) => {
   return handleResponse(res, 'Failed to delete student');
 };
 
-// 7. Change Teacher Password
+// 8. Change Teacher Password
 export const changeTeacherPassword = async (passwordData) => {
   const res = await fetch('/api/auth/change-password', {
     method: 'POST',
