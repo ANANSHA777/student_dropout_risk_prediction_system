@@ -102,14 +102,29 @@ const userSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    assigned_counselor_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     assignedPlan: {
       type: String,
       default: null,
     },
     financialAidStatus: {
       type: String,
-      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested'],
+      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Pending Institutional Support'],
       default: 'Paid',
+    },
+    financial_relief_status: {
+      type: String,
+      enum: ['NONE', 'REQUESTED', 'APPROVED', 'DISBURSED'],
+      default: 'NONE',
+    },
+    evaluation_source: {
+      type: String,
+      enum: ['AUTOMATED_AI', 'MANUAL_TEACHER_OVERRIDE'],
+      default: 'AUTOMATED_AI',
     },
   },
   {
@@ -131,8 +146,11 @@ userSchema.pre('save', async function () {
     this.riskCategory = undefined;
     this.primaryRiskCategory = undefined;
     this.assignedCounselor = undefined;
+    this.assigned_counselor_id = undefined;
     this.assignedPlan = undefined;
     this.financialAidStatus = undefined;
+    this.financial_relief_status = undefined;
+    this.evaluation_source = undefined;
   } else {
     // Default assignments for actual Student accounts
     if (this.surveyCompleted === undefined) this.surveyCompleted = false;

@@ -2,13 +2,16 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const StudentProfile = require('../models/StudentProfile');
+const CounselingSession = require('../models/CounselingSession');
 
-// @desc    Get all students flagged for counselor review/intervention (High/Medium risk)
+// @desc    Get all students assigned to counselor or flagged for counselor review
 // @route   GET /api/counselor/cases
 // @access  Private (Counselor, Admin)
 exports.getCounselorCases = async (req, res) => {
   try {
-    // 1. Fetch all students with role 'Student'
+    const counselorId = req.user?._id || req.user?.id;
+
+    // 1. Fetch all students
     const students = await User.find({ role: 'Student' })
       .select('-password')
       .sort({ createdAt: -1 })
@@ -18,7 +21,7 @@ exports.getCounselorCases = async (req, res) => {
 
     // 2. Fetch associated student profiles
     const profiles = await StudentProfile.find({ user: { $in: studentIds } }).lean();
-    
+
     const profileMap = new Map();
     profiles.forEach((profile) => {
       if (profile.user) {
@@ -26,31 +29,79 @@ exports.getCounselorCases = async (req, res) => {
       }
     });
 
-    // 3. Combine user info with profiles and filter strictly for actionable/flagged cases
+    // 3. Fetch recent counseling sessions for context
+    let sessions = [];
+    if (CounselingSession) {
+      sessions = await CounselingSession.find({ student: { $in: studentIds } })
+        .sort({ createdAt: -1 })
+        .lean();
+    }
+    const sessionMap = new Map();
+    sessions.forEach((s) => {
+      const sId = s.student?.toString();
+      if (sId && !sessionMap.has(sId)) {
+        sessionMap.set(sId, s);
+      }
+    });
+
+    // 4. Combine and filter
     const cases = students
       .map((user) => {
         const profile = profileMap.get(user._id.toString()) || {};
-        const riskLevel = profile.riskLevel || user.riskLevel || 'Unevaluated';
+        const session = sessionMap.get(user._id.toString()) || null;
+        const rawRisk = profile.riskLevel || user.riskLevel || 'Unevaluated';
+
+        const isDirectlyAssigned =
+          (profile.assigned_counselor_id && profile.assigned_counselor_id.toString() === counselorId?.toString()) ||
+          (profile.assignedCounselor && profile.assignedCounselor.toString() === counselorId?.toString()) ||
+          (session && session.counselor && session.counselor.toString() === counselorId?.toString());
+
+        const caseStatus = profile.counselingStatus || session?.status || 'Active Review';
+        const mentalHealth = profile.mentalHealthSelfReport || profile.mentalHealthState || 'Moderate';
+        const primaryConcern = profile.riskCategory && profile.riskCategory !== 'None'
+          ? profile.riskCategory
+          : profile.evaluationCase === 'CASE_A_WELLNESS_DISENGAGEMENT'
+          ? 'Wellness & Mental Health'
+          : 'Personal / Wellness';
 
         return {
           _id: user._id,
+          id: user._id,
           name: user.name,
           email: user.email,
           studentId: profile.studentId || user.studentId || '',
           department: profile.department || user.department || 'Computer Science',
           yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
-          riskLevel: riskLevel,
-          riskCategory: profile.riskCategory || 'None',
+          riskLevel: rawRisk,
+          riskCategory: primaryConcern,
           primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
-          interventions: profile.interventions || [],
+          concern: primaryConcern,
+          status: mentalHealth,
+          caseStatus: caseStatus,
+          counselingStatus: caseStatus,
+          isDirectlyAssigned,
+          assignedCounselor: profile.assignedCounselor || profile.assigned_counselor_id,
+          assigned_counselor_id: profile.assigned_counselor_id || profile.assignedCounselor,
+          nonAcademicRisk: profile.nonAcademicRisk || {},
+          evaluationCase: profile.evaluationCase || 'NONE',
+          intervention_logs: profile.intervention_logs || [],
           qualitativeNotes: profile.qualitativeNotes || [],
-          surveyCompleted: Boolean(profile.surveyCompleted || user.surveyCompleted),
+          interventions: profile.interventions || [],
           cgpa: profile.cgpa ?? user.cgpa ?? null,
           attendance: profile.attendancePercentage ?? user.attendance ?? null,
+          attendancePercentage: profile.attendancePercentage ?? user.attendance ?? null,
+          surveyCompleted: Boolean(profile.surveyCompleted || user.surveyCompleted),
+          surveyData: profile.surveyData || {},
+          sessionContext: session?.studentBackgroundContext || null,
         };
       })
-      // Keep students explicitly evaluated at 'High' or 'Medium' risk, or flagged for counseling
-      .filter((student) => ['High', 'Medium'].includes(student.riskLevel));
+      .filter((student) => {
+        if (student.isDirectlyAssigned) return true;
+        const r = String(student.riskLevel || '').toLowerCase();
+        const isHighOrMedium = r.includes('high') || r.includes('medium');
+        const isCaseA = student.evaluationCase === 'CASE_A_WELLNESS_DISENGAGEMENT';
+        return isHighOrMedium || isCaseA;
+      });
 
     res.status(200).json({
       success: true,
@@ -68,7 +119,7 @@ exports.getCounselorCases = async (req, res) => {
   }
 };
 
-// @desc    Log intervention note for a student
+// @desc    Log intervention note for a student and append to audit log
 // @route   POST /api/counselor/students/:id/intervention
 // @access  Private (Counselor, Admin)
 exports.logInterventionNote = async (req, res) => {
@@ -83,7 +134,6 @@ exports.logInterventionNote = async (req, res) => {
       });
     }
 
-    // Validate parameter format to prevent CastError
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -91,7 +141,6 @@ exports.logInterventionNote = async (req, res) => {
       });
     }
 
-    // Check if target student user exists
     const studentUser = await User.findOne({ _id: id, role: 'Student' });
     if (!studentUser) {
       return res.status(404).json({
@@ -100,39 +149,155 @@ exports.logInterventionNote = async (req, res) => {
       });
     }
 
+    const targetStatus = status || 'In Progress';
+    const counselorName = req.user?.name || 'Counselor';
+
     const newIntervention = {
       sessionType: sessionType || 'Counseling Session',
-      notes: notes || '',
-      status: status || 'In Progress',
+      notes: notes || actionPlan || '',
+      status: targetStatus,
       actionPlan: actionPlan || '',
       date: new Date(),
       counselor: req.user?._id || req.user?.id,
     };
 
-    // Record intervention on student profile
+    const auditLogEntry = {
+      action: `Counseling Note Logged (${sessionType || 'Session'})`,
+      performed_by: counselorName,
+      timestamp: new Date(),
+      notes: notes || actionPlan || 'Counseling session notes recorded.',
+    };
+
+    const qualitativeNoteEntry = {
+      authorRole: 'Counselor',
+      note: `[${sessionType || 'Counseling'}] ${notes || actionPlan}`,
+      category: 'Wellness',
+      createdAt: new Date(),
+    };
+
+    // Update Student Profile
     const updatedProfile = await StudentProfile.findOneAndUpdate(
       { user: id },
       {
-        $push: { interventions: newIntervention },
         $set: { 
-          counselingStatus: status || 'In Progress',
+          counselingStatus: targetStatus,
           updatedAt: new Date(),
+        },
+        $push: {
+          interventions: newIntervention,
+          intervention_logs: auditLogEntry,
+          qualitativeNotes: qualitativeNoteEntry,
         },
       },
       { new: true, upsert: true }
     );
 
+    // Also update active session if present
+    if (CounselingSession) {
+      await CounselingSession.updateMany(
+        { student: id, status: { $ne: 'Resolved' } },
+        { 
+          $set: { status: targetStatus },
+          $push: {
+            sessionNotes: {
+              note: notes || actionPlan,
+              addedBy: req.user?._id,
+              addedAt: new Date(),
+            },
+          },
+        }
+      );
+    }
+
     res.status(200).json({
       success: true,
-      message: 'Intervention logged successfully',
+      message: 'Intervention logged and audit history updated successfully',
       intervention: newIntervention,
       profile: updatedProfile,
+      intervention_logs: updatedProfile.intervention_logs,
     });
   } catch (error) {
     console.error('Error in logInterventionNote:', error);
     res.status(500).json({
       success: false,
       message: 'Server error logging intervention',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Update student counseling case status (Active Review, In Progress, Resolved, Escalated)
+// @route   PUT /api/counselor/students/:id/status
+// @access  Private (Counselor, Admin)
+exports.updateCaseStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ success: false, message: 'Status is required' });
+    }
+
+    const validStatuses = ['Active Review', 'In Progress', 'Resolved', 'Escalated'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid Student ID format' });
+    }
+
+    const counselorName = req.user?.name || 'Counselor';
+
+    const auditLogEntry = {
+      action: `Case Status: ${status}`,
+      performed_by: counselorName,
+      timestamp: new Date(),
+      notes: notes || `Counselor updated case status to "${status}".`,
+    };
+
+    const updatedProfile = await StudentProfile.findOneAndUpdate(
+      { user: id },
+      {
+        $set: {
+          counselingStatus: status,
+          updatedAt: new Date(),
+        },
+        $push: {
+          intervention_logs: auditLogEntry,
+          qualitativeNotes: {
+            authorRole: 'Counselor',
+            note: `Status changed to ${status}. ${notes || ''}`,
+            category: 'Wellness',
+            createdAt: new Date(),
+          },
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    if (CounselingSession) {
+      await CounselingSession.updateMany(
+        { student: id },
+        { $set: { status: status === 'Active Review' ? 'Assigned' : status } }
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Case status successfully updated to ${status}`,
+      status,
+      intervention_logs: updatedProfile.intervention_logs,
+      profile: updatedProfile,
+    });
+  } catch (error) {
+    console.error('Error in updateCaseStatus:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating case status',
       error: error.message,
     });
   }

@@ -126,6 +126,19 @@ exports.getStudentProfile = async (req, res) => {
         : ['None of the Above'],
     };
 
+    let counselorName = null;
+    const counselorId = profile.assigned_counselor_id || profile.assignedCounselor;
+    if (counselorId) {
+      const cUser = await User.findById(counselorId).select('name email department').lean();
+      if (cUser) counselorName = cUser.name;
+    }
+
+    // Determine clean risk category
+    let cleanCategory = profile.riskCategory || 'None';
+    if (profile.evaluationCase === 'CASE_A_WELLNESS_DISENGAGEMENT' && (!cleanCategory || cleanCategory === 'None')) {
+      cleanCategory = 'Wellness & Mental Health';
+    }
+
     res.status(200).json({
       success: true,
       profile: {
@@ -135,7 +148,18 @@ exports.getStudentProfile = async (req, res) => {
         surveyCompleted: Boolean(profile.surveyCompleted),
         surveyStatus: profile.surveyCompleted ? 'Completed' : 'Pending',
         riskLevel: profile.riskLevel || 'Unevaluated',
-        riskCategory: profile.riskCategory || 'None',
+        riskCategory: cleanCategory,
+        primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
+        evaluationCase: profile.evaluationCase || 'NONE',
+        assignedCounselorName: counselorName,
+        counselorName: counselorName,
+        assigned_counselor_id: counselorId,
+        assignedCounselor: counselorId,
+        counselingStatus: profile.counselingStatus || 'Active Review',
+        financial_relief_status: profile.financial_relief_status || (profile.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE'),
+        financialAidStatus: profile.financialAidStatus || 'Paid',
+        collegeFinancialAid: profile.collegeFinancialAid || {},
+        intervention_logs: profile.intervention_logs || [],
         canEvaluate, // Enable AI evaluate button ONLY if CGPA, Attendance, and Survey are complete
         academicInterest: normalizedSurveyData.academicInterest,
         abilityToStudy: normalizedSurveyData.abilityToStudy,

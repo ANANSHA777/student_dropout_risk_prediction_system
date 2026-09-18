@@ -5,15 +5,27 @@ import { ShieldAlert, AlertTriangle, CheckCircle2, HelpCircle, Users } from 'luc
 export default function TeacherStats({ students = [] }) {
   const total = students.length;
 
-  // Strict filtering for Risk Levels & Evaluated status
-  const highRisk = students.filter((s) => s.riskLevel === 'High').length;
-  const mediumRisk = students.filter((s) => s.riskLevel === 'Medium').length;
-  const lowRisk = students.filter((s) => s.riskLevel === 'Low').length;
+  // Dynamic filtering for Risk Levels & Evaluated status (supports "High Risk", "High", etc.)
+  const highRisk = students.filter((s) => {
+    const r = String(s.riskLevel || '').toLowerCase();
+    return r.includes('high');
+  }).length;
 
-  // Evaluates empty values as well as 'Unevaluated' and 'Pending' strings
-  const unevaluated = students.filter(
-    (s) => !s.riskLevel || s.riskLevel === 'Unevaluated' || s.riskLevel === 'Pending'
-  ).length;
+  const mediumRisk = students.filter((s) => {
+    const r = String(s.riskLevel || '').toLowerCase();
+    return r.includes('medium') || r.includes('moderate');
+  }).length;
+
+  const lowRisk = students.filter((s) => {
+    const r = String(s.riskLevel || '').toLowerCase();
+    return (r.includes('low') || r.includes('safe') || r.includes('normal')) && !r.includes('high') && !r.includes('medium');
+  }).length;
+
+  const unevaluated = students.filter((s) => {
+    if (!s.riskLevel) return true;
+    const r = String(s.riskLevel).toLowerCase();
+    return r.includes('unevaluated') || r.includes('pending') || s.riskEvaluated === false;
+  }).length;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">

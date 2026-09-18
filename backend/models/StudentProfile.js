@@ -171,7 +171,7 @@ const studentProfileSchema = new mongoose.Schema(
     },
     financialAidStatus: {
       type: String,
-      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Approved', 'Not Applied'],
+      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Approved', 'Not Applied', 'Pending Institutional Support'],
       default: 'Paid',
     },
     financialAidGrant: {
@@ -182,7 +182,7 @@ const studentProfileSchema = new mongoose.Schema(
     collegeFinancialAid: {
       status: { 
         type: String, 
-        enum: ['Not Applied', 'Pending Review', 'Approved', 'Rejected'], 
+        enum: ['Not Applied', 'Pending Review', 'Approved', 'Rejected', 'Pending Institutional Support'], 
         default: 'Not Applied' 
       },
       grantAmount: { type: Number, default: 0 },
@@ -208,6 +208,42 @@ const studentProfileSchema = new mongoose.Schema(
         createdAt: {
           type: Date,
           default: Date.now,
+        },
+      },
+    ],
+
+    // --- FINANCIAL RELIEF STATUS (STRICT SPEC) ---
+    financial_relief_status: {
+      type: String,
+      enum: ['NONE', 'REQUESTED', 'APPROVED', 'DISBURSED'],
+      default: 'NONE',
+    },
+
+    // --- EVALUATION SOURCE ---
+    evaluation_source: {
+      type: String,
+      enum: ['AUTOMATED_AI', 'MANUAL_TEACHER_OVERRIDE'],
+      default: 'AUTOMATED_AI',
+    },
+
+    // --- INTERVENTION AUDIT LOGS (CHRONOLOGICAL TIMELINE) ---
+    intervention_logs: [
+      {
+        action: {
+          type: String,
+          required: true,
+        },
+        performed_by: {
+          type: String,
+          default: 'System',
+        },
+        timestamp: {
+          type: Date,
+          default: Date.now,
+        },
+        notes: {
+          type: String,
+          default: '',
         },
       },
     ],
@@ -255,11 +291,45 @@ const studentProfileSchema = new mongoose.Schema(
       default: 'TEACHER',
     },
 
+    evaluationCase: {
+      type: String,
+      enum: ['CASE_A_WELLNESS_DISENGAGEMENT', 'CASE_B_FINANCIAL_STRESS', 'CASE_C_PURE_ACADEMIC', 'NONE'],
+      default: 'NONE',
+    },
+    nonAcademicRisk: {
+      wellness: {
+        score: { type: Number, default: 0 },
+        level: { type: String, default: 'Low' },
+        details: { type: String, default: '' },
+      },
+      disengagement: {
+        score: { type: Number, default: 0 },
+        level: { type: String, default: 'Low' },
+        details: { type: String, default: '' },
+        rootCause: { type: String, default: 'None' },
+      },
+      financial: {
+        score: { type: Number, default: 0 },
+        level: { type: String, default: 'Low' },
+        details: { type: String, default: '' },
+      },
+    },
+
     // --- ASSIGNED INTERVENTIONS & COUNSELING ---
     assignedCounselor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,
+    },
+    assigned_counselor_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    counselingStatus: {
+      type: String,
+      enum: ['Active Review', 'In Progress', 'Resolved', 'Escalated', 'Referral Initiated', 'Assigned', 'Pending Contact'],
+      default: 'Active Review',
     },
     assignedPlan: {
       type: String,
@@ -272,6 +342,13 @@ const studentProfileSchema = new mongoose.Schema(
     academicPlan: {
       type: String,
       default: null,
+    },
+    academicInterventionPlan: {
+      studySchedule: { type: String, default: '' },
+      remedialClasses: [{ type: String }],
+      backlogTracking: { type: String, default: '' },
+      cgpaRecoveryMilestones: [{ type: String }],
+      generatedAt: { type: Date },
     },
 
     // --- AUTOMATED ACTION FLAGS ---
@@ -292,7 +369,23 @@ const studentProfileSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      assignCounselor: {
+        type: Boolean,
+        default: false,
+      },
       grantFinancialAid: {
+        type: Boolean,
+        default: false,
+      },
+      requestCollegeFund: {
+        type: Boolean,
+        default: false,
+      },
+      routeToAcademicPlan: {
+        type: Boolean,
+        default: false,
+      },
+      suppressAcademicPenalty: {
         type: Boolean,
         default: false,
       },

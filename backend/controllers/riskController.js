@@ -1,9 +1,12 @@
-// controllers/riskController.js
+// backend/controllers/riskController.js
+const mongoose = require('mongoose');
 const StudentProfile = require('../models/StudentProfile');
 const User = require('../models/User');
+const CounselingSession = require('../models/CounselingSession');
 const { evaluateStudentRiskWithGemini } = require('../services/riskService');
+const { generateAcademicPlan } = require('../services/academicPlanService');
 
-// @desc    Trigger AI Risk Evaluation checking ALL survey fields, body payloads, & database fields
+// @desc    Trigger AI Risk Evaluation checking Non-Academic Categories & Decision Matrix
 // @route   POST /api/risk/evaluate
 // @access  Private (Teacher, Counselor, Admin)
 exports.evaluateStudentRisk = async (req, res) => {
@@ -16,7 +19,7 @@ exports.evaluateStudentRisk = async (req, res) => {
     }
 
     // 1. Fetch User Document
-    const query = targetId.match(/^[0-9a-fA-F]{24}$/) ? { _id: targetId } : { studentId: targetId };
+    const query = mongoose.Types.ObjectId.isValid(targetId) ? { _id: targetId } : { studentId: targetId };
     const user = await User.findOne(query).select('-password');
 
     if (!user) {
@@ -32,7 +35,6 @@ exports.evaluateStudentRisk = async (req, res) => {
     // Sync incoming survey data into student profile memory & DB
     if (incomingSurvey && typeof incomingSurvey === 'object') {
       if (!profile.surveyData) profile.surveyData = new Map();
-      
       Object.entries(incomingSurvey).forEach(([k, v]) => {
         if (profile.surveyData instanceof Map) {
           profile.surveyData.set(k, v);
@@ -42,17 +44,16 @@ exports.evaluateStudentRisk = async (req, res) => {
       });
     }
 
-    // 3. Extract surveyData cleanly handling Mongoose Maps, plain Objects, and Request Body
+    // 3. Extract surveyData cleanly
     let dbSurvey = {};
     if (profile.surveyData) {
-      dbSurvey = profile.surveyData instanceof Map 
-        ? Object.fromEntries(profile.surveyData) 
+      dbSurvey = profile.surveyData instanceof Map
+        ? Object.fromEntries(profile.surveyData)
         : profile.surveyData;
     }
 
     const survey = { ...dbSurvey, ...(incomingSurvey || {}) };
 
-    // --- HELPER FUNCTION: Safely search across multiple key aliases ---
     const getField = (...keys) => {
       for (const key of keys) {
         if (survey[key] !== undefined && survey[key] !== null && survey[key] !== '') return survey[key];
@@ -64,171 +65,115 @@ exports.evaluateStudentRisk = async (req, res) => {
     // Extract Academic & Attendance
     const cgpa = profile.cgpa ?? profile.latestMarks ?? getField('cgpa', 'latestMarks');
     const attendancePercentage = profile.attendancePercentage ?? profile.attendance ?? getField('attendancePercentage', 'attendance');
+    const activeBacklogs = getField('activeBacklogs', 'backlogs', 'failedSubjects') || '0 Backlogs';
+    const assignmentsSubmitted = profile.assignmentsSubmitted ?? 0;
+    const assignmentsTotal = profile.assignmentsTotal ?? 0;
 
-    // Extract All Survey Factors
-    const academicInterest = getField('academicInterest', 'interest', 'motivationLevel') || 'Not Provided';
-    const abilityToStudy = getField('abilityToStudy', 'studyEnvironment', 'studyAbility') || 'Not Provided';
-    const familyMonthlyIncome = getField('familyMonthlyIncome', 'familyIncome', 'income') || 'Not Provided';
-    const moneyFeeWorries = getField('moneyFeeWorries', 'financialStress', 'financialStatus', 'feeWorries') || 'Not Provided';
-    const livingSituation = getField('livingSituation', 'residence', 'housing') || 'Not Provided';
-    const partTimeWork = getField('partTimeWork', 'partTimeJob', 'workHours') || 'Not Provided';
-    const dailySelfStudyHours = getField('dailySelfStudyHours', 'studyHoursPerDay', 'studyHours') || 'Not Provided';
-    const dailyCommuteTime = getField('dailyCommuteTime', 'commuteTime', 'commute') || 'Not Provided';
-    const activeBacklogs = getField('activeBacklogs', 'backlogs', 'failedSubjects') || 'Not Provided';
-    const nightlySleepHours = getField('nightlySleepHours', 'sleepHoursPerNight', 'sleepHours', 'sleep') || 'Not Provided';
-    const mentalHealthState = getField('mentalHealthState', 'mentalHealthSelfReport', 'mentalHealthStatus', 'mentalHealth') || 'Not Provided';
-    
+    // Extract Non-Academic Survey Factors
+    const academicInterest = getField('academicInterest', 'interest', 'motivationLevel') || 'High (Interested & Motivated)';
+    const disengagementReason = getField('disengagementReason') || 'None';
+    const abilityToStudy = getField('abilityToStudy', 'studyEnvironment', 'studyAbility') || 'Full (Good Environment & Focus)';
+    const familyIncome = getField('familyIncome', 'familyMonthlyIncome', 'income') || '';
+    const financialStress = getField('financialStress', 'moneyFeeWorries', 'feeWorries') || '';
+    const livingSituation = getField('livingSituation', 'residence', 'housing') || '';
+    const partTimeJob = getField('partTimeJob', 'partTimeWork', 'job') || '';
+    const studyHoursPerDay = getField('studyHoursPerDay', 'dailySelfStudyHours', 'studyHours') || '';
+    const commuteTime = getField('commuteTime', 'dailyCommuteTime', 'commute') || '';
+    const sleepHoursPerNight = getField('sleepHoursPerNight', 'nightlySleepHours', 'sleep') || '';
+    const mentalHealthState = getField('mentalHealthState', 'mentalHealthSelfReport', 'mentalHealthStatus', 'mentalHealth') || '';
+
     let impactFactors = getField('impactFactors', 'addictions', 'distractions') || [];
     if (typeof impactFactors === 'string') impactFactors = [impactFactors];
 
-    console.log(`[AI EVALUATION] Student: ${user.name} (${user._id})`);
-    console.log(`[AI EVALUATION] Mental Health: "${mentalHealthState}" | Financial: "${moneyFeeWorries}"`);
-    console.log(`[AI EVALUATION] Interest: "${academicInterest}" | Study Ability: "${abilityToStudy}"`);
-
-    // 4. Construct Payload for AI Service
     const evaluationPayload = {
       studentName: user.name,
-      academicPerformance: { cgpa, attendancePercentage, activeBacklogs },
-      academicEngagement: { academicInterest, abilityToStudy, dailySelfStudyHours },
-      financialAndLogistics: { familyMonthlyIncome, moneyFeeWorries, livingSituation, partTimeWork, dailyCommuteTime },
-      wellnessAndLifestyle: { nightlySleepHours, mentalHealthState, impactFactors },
+      cgpa,
+      attendancePercentage,
+      activeBacklogs,
+      assignmentsSubmitted,
+      assignmentsTotal,
+      academicInterest,
+      disengagementReason,
+      abilityToStudy,
+      financialStress,
+      familyIncome,
+      livingSituation,
+      partTimeJob,
+      studyHoursPerDay,
+      commuteTime,
+      sleepHoursPerNight,
+      mentalHealthState,
+      impactFactors,
       qualitativeNotes: profile.qualitativeNotes || [],
     };
 
-    // 5. Run AI Assessment via Gemini Service with Fallback
-    let aiAssessment = { riskLevel: 'Low Risk', riskCategory: 'None', aiRecommendations: [] };
-    try {
-      if (typeof evaluateStudentRiskWithGemini === 'function') {
-        aiAssessment = await evaluateStudentRiskWithGemini(evaluationPayload);
-      }
-    } catch (aiErr) {
-      console.warn('[AI EVALUATION] Gemini API warning, applying local safeguards:', aiErr.message);
-    }
+    // 4. Run AI & Decision Matrix Evaluation
+    const assessment = await evaluateStudentRiskWithGemini(evaluationPayload);
 
-    let finalRiskLevel = aiAssessment.riskLevel || 'Low Risk';
-    let finalRiskCategory = aiAssessment.riskCategory || 'None';
-
-    // Standardize Risk Level Formatting
-    const lowerLevel = String(finalRiskLevel).toLowerCase();
-    if (lowerLevel.includes('low')) finalRiskLevel = 'Low Risk';
-    if (lowerLevel.includes('medium')) finalRiskLevel = 'Medium Risk';
-    if (lowerLevel.includes('high')) finalRiskLevel = 'High Risk';
-
-    // 6. SAFEGUARD RULE ENGINE (Rules apply on top of AI results)
-    const mentalLower = String(mentalHealthState).toLowerCase();
-    const financialLower = String(moneyFeeWorries).toLowerCase();
-    const interestLower = String(academicInterest).toLowerCase();
-    const abilityLower = String(abilityToStudy).toLowerCase();
-    const studyHoursLower = String(dailySelfStudyHours).toLowerCase();
-    const backlogsLower = String(activeBacklogs).toLowerCase();
-    const sleepLower = String(nightlySleepHours).toLowerCase();
-    const impactString = Array.isArray(impactFactors) ? impactFactors.join(' ').toLowerCase() : '';
-
-    // Explicit check for student disinterest/apathy
-    const isDisinterested =
-      interestLower.includes('not interested') ||
-      interestLower.includes('no interest') ||
-      interestLower.includes('disinterested') ||
-      interestLower.includes('hate') ||
-      interestLower.includes('unmotivated') ||
-      interestLower.includes('low');
-
-    const isPoorMentalHealth =
-      mentalLower.includes('anxious') ||
-      mentalLower.includes('stressed') ||
-      mentalLower.includes('depressed') ||
-      mentalLower.includes('overwhelmed') ||
-      mentalLower.includes('poor') ||
-      sleepLower.includes('less than 5');
-
-    const isPoorFinancial =
-      financialLower.includes('high') ||
-      financialLower.includes('severe') ||
-      financialLower.includes('burden') ||
-      financialLower.includes('moderate') ||
-      financialLower.includes('manageable') ||
-      financialLower.includes('yes');
-
-    const isPoorAcademic =
-      (cgpa !== null && Number(cgpa) < 6.5) ||
-      (attendancePercentage !== null && Number(attendancePercentage) < 75) ||
-      isDisinterested ||
-      abilityLower.includes('partial') ||
-      abilityLower.includes('distraction') ||
-      studyHoursLower.includes('less than 1') ||
-      backlogsLower.includes('1') ||
-      backlogsLower.includes('2') ||
-      backlogsLower.includes('3');
-
-    const hasBehavioralRisk =
-      impactString.includes('substance') ||
-      impactString.includes('gaming') ||
-      impactString.includes('social media') ||
-      impactString.includes('addiction');
-
-    // Categorization Priority Rules
-    if (isPoorMentalHealth || hasBehavioralRisk) {
-      finalRiskCategory = isPoorAcademic ? 'Academic & Mental Health Concern' : 'Wellness & Mental Health';
-      if (finalRiskLevel === 'Low Risk') finalRiskLevel = 'Medium Risk';
-      if (mentalLower.includes('depressed') || mentalLower.includes('overwhelmed')) {
-        finalRiskLevel = 'High Risk';
-      }
-    } else if (isDisinterested && isPoorAcademic) {
-      finalRiskCategory = 'Academic & Mental Health Concern';
-      if (finalRiskLevel === 'Low Risk') finalRiskLevel = 'Medium Risk';
-    } else if (isPoorFinancial) {
-      finalRiskCategory = 'Financial Strain';
-      if (finalRiskLevel === 'Low Risk') finalRiskLevel = 'Medium Risk';
-    } else if (isPoorAcademic) {
-      finalRiskCategory = 'Academic Concern';
-      if (finalRiskLevel === 'Low Risk') finalRiskLevel = 'Medium Risk';
-
-      if ((cgpa !== null && Number(cgpa) < 4.5) || backlogsLower.includes('3')) {
-        finalRiskLevel = 'High Risk';
-      }
-    }
-
-    // 7. Save Profile Updates
-    profile.riskLevel = finalRiskLevel;
-    profile.riskCategory = finalRiskCategory;
-    profile.primaryRiskCategory =
-      finalRiskCategory.includes('Wellness') || finalRiskCategory.includes('Mental Health') ? 'WELLNESS' :
-      finalRiskCategory.includes('Financial') ? 'FINANCIAL' :
-      finalRiskCategory.includes('Academic') ? 'ACADEMIC' : 'NONE';
-
+    // 5. Update Profile
+    profile.riskLevel = assessment.riskLevel;
+    profile.riskCategory = assessment.riskCategory;
+    profile.primaryRiskCategory = assessment.primaryRiskCategory;
+    profile.assignedRole = assessment.assignedRole;
+    profile.evaluationCase = assessment.evaluationCase;
+    profile.nonAcademicRisk = assessment.nonAcademicRisk;
+    profile.recommendedActions = assessment.recommendedActions;
+    profile.aiRecommendations = assessment.aiRecommendations;
     profile.riskEvaluated = true;
-    profile.aiRecommendations = aiAssessment.aiRecommendations || profile.aiRecommendations || [];
     profile.lastEvaluatedAt = new Date();
     profile.lastAiAnalysisDate = new Date();
+    profile.evaluation_source = 'AUTOMATED_AI';
 
-    // 8. Action Flags Assignment
-    const isCounselorRequired =
-      isPoorMentalHealth ||
-      isPoorFinancial ||
-      hasBehavioralRisk ||
-      isDisinterested ||
-      finalRiskLevel === 'Medium Risk' ||
-      finalRiskLevel === 'High Risk';
+    if (!profile.intervention_logs) profile.intervention_logs = [];
+    profile.intervention_logs.push({
+      action: `AI Risk Evaluated: ${assessment.riskLevel}`,
+      performed_by: req.user?.name || req.user?.role || 'System / AI',
+      timestamp: new Date(),
+      notes: `Evaluated Case: ${assessment.evaluationCase}. Category: ${assessment.riskCategory}. Role: ${assessment.assignedRole}`,
+    });
 
-    profile.recommendedActions = {
-      enableRemedialQuiz: isPoorAcademic,
-      matchPeerTutor: isPoorAcademic,
-      assignTeacherMentor: finalRiskLevel !== 'Low Risk',
-      escalateToCounselor: isCounselorRequired,
-      assignCounselor: isCounselorRequired,
-      escalateCounselor: isCounselorRequired,
-    };
+    // Automated Workflow for Case B: Mark status as "Pending Institutional Support"
+    if (assessment.evaluationCase === 'CASE_B_FINANCIAL_STRESS') {
+      profile.financialAidStatus = 'Pending Institutional Support';
+      profile.financial_relief_status = 'REQUESTED';
+      profile.collegeFinancialAid.status = 'Pending Institutional Support';
+      if (!profile.collegeFinancialAid.appliedAt) {
+        profile.collegeFinancialAid.appliedAt = new Date();
+      }
+    }
+
+    // Automated Workflow for Case C: Route to Academic Plan Module
+    if (assessment.evaluationCase === 'CASE_C_PURE_ACADEMIC') {
+      const academicPlan = generateAcademicPlan({
+        cgpa,
+        attendancePercentage,
+        activeBacklogs,
+        assignmentsSubmitted,
+        assignmentsTotal,
+      });
+      profile.academicInterventionPlan = {
+        studySchedule: academicPlan.studySchedule,
+        remedialClasses: academicPlan.remedialClasses,
+        backlogTracking: academicPlan.backlogTracking,
+        cgpaRecoveryMilestones: academicPlan.cgpaRecoveryMilestones,
+        generatedAt: new Date(),
+      };
+      profile.assignedAcademicPlan = academicPlan.planType;
+      profile.academicPlan = academicPlan.planType;
+    }
+
+    user.riskLevel = assessment.riskLevel;
+    await user.save();
 
     profile.markModified('surveyData');
     profile.markModified('recommendedActions');
-
+    profile.markModified('nonAcademicRisk');
+    profile.markModified('collegeFinancialAid');
     await profile.save();
-
-    console.log(`[AI EVALUATION COMPLETE] Level: ${finalRiskLevel} | Category: ${finalRiskCategory} | Counselor Escalation: ${isCounselorRequired}`);
 
     return res.status(200).json({
       success: true,
-      message: 'Student risk evaluated with all survey details',
+      message: `Risk evaluation complete: ${assessment.riskLevel} (${assessment.riskCategory}). Workflow: ${assessment.evaluationCase}`,
       assessment: {
         studentId: user._id,
         id: user._id,
@@ -236,19 +181,278 @@ exports.evaluateStudentRisk = async (req, res) => {
         riskLevel: profile.riskLevel,
         riskCategory: profile.riskCategory,
         primaryRiskCategory: profile.primaryRiskCategory,
-        riskEvaluated: profile.riskEvaluated,
-        aiRecommendations: profile.aiRecommendations,
+        assignedRole: profile.assignedRole,
+        evaluationCase: profile.evaluationCase,
+        nonAcademicRisk: profile.nonAcademicRisk,
         recommendedActions: profile.recommendedActions,
-        escalateToCounselor: isCounselorRequired,
-        assignCounselor: isCounselorRequired,
+        aiRecommendations: profile.aiRecommendations,
+        financialAidStatus: profile.financialAidStatus,
+        collegeFinancialAid: profile.collegeFinancialAid,
+        academicInterventionPlan: profile.academicInterventionPlan,
       },
     });
   } catch (error) {
     console.error('Error in evaluateStudentRisk:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to process AI risk evaluation',
+      message: 'Failed to process risk evaluation',
       error: error.message,
     });
+  }
+};
+
+// @desc    Assign Academic Support Plan
+// @route   POST /api/risk/assign-plan
+// @access  Private (Teacher, Admin)
+exports.assignAcademicPlan = async (req, res) => {
+  try {
+    const { studentId, id, planType, notes } = req.body;
+    const targetId = studentId || id;
+
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required' });
+    }
+
+    const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
+    const profile = await StudentProfile.findOne(
+      isObjectId ? { $or: [{ user: targetId }, { _id: targetId }] } : { studentId: targetId }
+    );
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const academicPlan = generateAcademicPlan({
+      cgpa: profile.cgpa,
+      attendancePercentage: profile.attendancePercentage,
+      activeBacklogs: profile.activeBacklogs,
+      assignmentsSubmitted: profile.assignmentsSubmitted,
+      assignmentsTotal: profile.assignmentsTotal,
+    });
+
+    const chosenPlan = planType || academicPlan.planType;
+    profile.assignedAcademicPlan = chosenPlan;
+    profile.academicPlan = chosenPlan;
+    profile.assignedPlan = chosenPlan;
+    profile.academicInterventionPlan = {
+      studySchedule: academicPlan.studySchedule,
+      remedialClasses: academicPlan.remedialClasses,
+      backlogTracking: academicPlan.backlogTracking,
+      cgpaRecoveryMilestones: academicPlan.cgpaRecoveryMilestones,
+      generatedAt: new Date(),
+    };
+
+    if (notes) {
+      profile.qualitativeNotes.push({
+        authorRole: req.user?.role || 'Teacher',
+        note: `Assigned Academic Support: ${chosenPlan}. Notes: ${notes}`,
+        category: 'Academic',
+        createdAt: new Date(),
+      });
+    }
+
+    await profile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Academic plan assigned: ${chosenPlan}`,
+      plan: chosenPlan,
+      academicInterventionPlan: profile.academicInterventionPlan,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Assign Counselor to student and create Counseling Log with context
+// @route   POST /api/risk/assign-counselor
+// @access  Private (Teacher, Admin)
+exports.assignCounselor = async (req, res) => {
+  try {
+    const { studentId, id, counselorId, reasonForReferral, notes } = req.body;
+    const targetId = studentId || id;
+
+    if (!targetId || !counselorId) {
+      return res.status(400).json({ success: false, message: 'Student ID and Counselor ID are required' });
+    }
+
+    const counselor = await User.findOne({ _id: counselorId, role: 'Counselor' });
+    if (!counselor) {
+      return res.status(404).json({ success: false, message: 'Selected counselor not found' });
+    }
+
+    const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
+    const profile = await StudentProfile.findOne(
+      isObjectId ? { $or: [{ user: targetId }, { _id: targetId }] } : { studentId: targetId }
+    );
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    profile.assignedCounselor = counselor._id;
+    profile.assigned_counselor_id = counselor._id;
+    profile.assignedRole = 'COUNSELOR';
+    profile.counselingStatus = 'Active Review';
+
+    if (!profile.intervention_logs) profile.intervention_logs = [];
+    profile.intervention_logs.push({
+      action: 'Counselor Assigned',
+      performed_by: req.user?.name || req.user?.role || 'Teacher',
+      timestamp: new Date(),
+      notes: notes || `Assigned to Counselor ${counselor.name}. Reason: ${reasonForReferral || 'Supportive non-academic counseling initiated.'}`,
+    });
+
+    await profile.save();
+
+    await User.findByIdAndUpdate(profile.user, {
+      $set: {
+        assignedCounselor: counselor._id,
+        assigned_counselor_id: counselor._id,
+      },
+    });
+
+    // Create detailed Counseling Log notifying the assigned counselor with student background context
+    const backgroundContext = {
+      wellnessSummary: profile.mentalHealthSelfReport || profile.mentalHealthState || 'Moderate',
+      disengagementReason: profile.disengagementReason || 'None',
+      financialStatus: profile.financialStress || profile.moneyFeeWorries || 'Stable',
+      academicSnapshot: {
+        cgpa: profile.cgpa,
+        attendance: profile.attendancePercentage,
+        backlogs: profile.activeBacklogs || '0 Backlogs',
+      },
+      evaluationCase: profile.evaluationCase || 'CASE_A_WELLNESS_DISENGAGEMENT',
+    };
+
+    const session = await CounselingSession.create({
+      student: profile.user,
+      assignedBy: req.user?._id,
+      counselor: counselor._id,
+      riskCategory: profile.riskCategory || 'Wellness & Mental Health',
+      reasonForReferral: reasonForReferral || 'Referred for supportive counseling.',
+      notes: notes || `Referred by ${req.user?.name || 'Faculty'}. Non-academic counseling initiated.`,
+      status: 'Assigned',
+      studentBackgroundContext: backgroundContext,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully assigned Counselor ${counselor.name} and created counseling log.`,
+      counselor: { _id: counselor._id, name: counselor.name, email: counselor.email },
+      session,
+      intervention_logs: profile.intervention_logs,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Process College Fund Request / Emergency Financial Grant
+// @route   POST /api/risk/grant-financial-aid
+// @access  Private (Teacher, Admin)
+exports.grantFinancialAid = async (req, res) => {
+  try {
+    const { studentId, id, amount, reason, notes } = req.body;
+    const targetId = studentId || id;
+
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required' });
+    }
+
+    const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
+    const profile = await StudentProfile.findOne(
+      isObjectId ? { $or: [{ user: targetId }, { _id: targetId }] } : { studentId: targetId }
+    );
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const grantAmount = Number(amount) || 5000;
+    profile.financialAidStatus = 'Pending Institutional Support';
+    profile.financial_relief_status = 'REQUESTED';
+    profile.collegeFinancialAid = {
+      status: 'Pending Institutional Support',
+      grantAmount,
+      appliedAt: new Date(),
+    };
+    profile.assignedRole = 'FINANCIAL_AID';
+
+    profile.qualitativeNotes.push({
+      authorRole: req.user?.role || 'Teacher',
+      note: `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: ${notes || 'Pending institutional review.'}`,
+      category: 'Financial',
+      createdAt: new Date(),
+    });
+
+    if (!profile.intervention_logs) profile.intervention_logs = [];
+    profile.intervention_logs.push({
+      action: 'College Fund Requested',
+      performed_by: req.user?.name || req.user?.role || 'Teacher',
+      timestamp: new Date(),
+      notes: `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: ${notes || 'Pending institutional review.'}`,
+    });
+
+    await profile.save();
+
+    await User.findByIdAndUpdate(profile.user, {
+      $set: {
+        financialAidStatus: 'Pending Institutional Support',
+        financial_relief_status: 'REQUESTED',
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'College Fund Request submitted. Student marked as "Pending Institutional Support".',
+      financialAidStatus: profile.financialAidStatus,
+      financial_relief_status: profile.financial_relief_status,
+      collegeFinancialAid: profile.collegeFinancialAid,
+      intervention_logs: profile.intervention_logs,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Fetch class/department wide risk overview
+// @route   GET /api/risk/overview
+// @access  Private (Teacher, Counselor, Admin)
+exports.getRiskOverview = async (req, res) => {
+  try {
+    const profiles = await StudentProfile.find().populate('user', 'name email role department').lean();
+
+    const counts = {
+      highRisk: 0,
+      mediumRisk: 0,
+      lowRisk: 0,
+      unevaluated: 0,
+      caseA: 0,
+      caseB: 0,
+      caseC: 0,
+      pendingInstitutionalSupport: 0,
+    };
+
+    profiles.forEach((p) => {
+      const lvl = String(p.riskLevel || '').toLowerCase();
+      if (lvl.includes('high')) counts.highRisk++;
+      else if (lvl.includes('medium')) counts.mediumRisk++;
+      else if (lvl.includes('low')) counts.lowRisk++;
+      else counts.unevaluated++;
+
+      if (p.evaluationCase === 'CASE_A_WELLNESS_DISENGAGEMENT') counts.caseA++;
+      if (p.evaluationCase === 'CASE_B_FINANCIAL_STRESS') counts.caseB++;
+      if (p.evaluationCase === 'CASE_C_PURE_ACADEMIC') counts.caseC++;
+      if (p.financialAidStatus === 'Pending Institutional Support') counts.pendingInstitutionalSupport++;
+    });
+
+    return res.status(200).json({
+      success: true,
+      overview: counts,
+      totalStudents: profiles.length,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

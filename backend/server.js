@@ -37,13 +37,18 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/students', require('./routes/studentRoutes'));
-app.use('/api/risk', require('./routes/riskRoutes'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/counselor', counselorRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/risk', riskRoutes);
+app.use('/api/academic-plan', require('./routes/academicPlanRoutes'));
+
+// Public/Protected Counselor Directory endpoint (/api/counselors)
+const { protect: protectAuth } = require('./middleware/authMiddleware');
+const { getRegisteredCounselors } = require('./controllers/teacherController');
+app.get('/api/counselors', protectAuth, getRegisteredCounselors);
 
 // 404 Catch-All for API routes (Prevents HTML 404 fallback responses)
 app.use('/api', (req, res) => {

@@ -131,8 +131,23 @@ exports.getTeacherStudents = async (req, res) => {
         riskCategory: profile.riskCategory || 'None',
         primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
         assignedRole: profile.assignedRole || 'TEACHER',
+        evaluationCase: profile.evaluationCase || 'NONE',
+        nonAcademicRisk: profile.nonAcademicRisk || {},
+        recommendedActions: profile.recommendedActions || {},
+        financialAidStatus: profile.financialAidStatus || 'Paid',
+        collegeFinancialAid: profile.collegeFinancialAid || {},
+        assignedCounselor: profile.assignedCounselor || profile.assigned_counselor_id || null,
+        assigned_counselor_id: profile.assigned_counselor_id || profile.assignedCounselor || null,
+        financial_relief_status: profile.financial_relief_status || (profile.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE'),
+        evaluation_source: profile.evaluation_source || 'AUTOMATED_AI',
+        intervention_logs: profile.intervention_logs || [],
+        counselingStatus: profile.counselingStatus || 'Active Review',
+        assignedAcademicPlan: profile.assignedAcademicPlan || profile.academicPlan || null,
+        academicPlan: profile.academicPlan || profile.assignedAcademicPlan || null,
+        academicInterventionPlan: profile.academicInterventionPlan || null,
         aiRecommendations: profile.aiRecommendations || [],
         qualitativeNotes: profile.qualitativeNotes || [],
+        surveyData: profile.surveyData || {},
       };
     });
 
@@ -242,7 +257,7 @@ exports.updateStudentMarks = async (req, res) => {
   }
 };
 
-// @desc    Get list of all registered counselors for assignment dropdown
+// @desc    Get list of all registered counselors for assignment dropdown with active case counts
 // @route   GET /api/teacher/counselors
 // @access  Private (Teacher, Admin)
 exports.getRegisteredCounselors = async (req, res) => {
@@ -251,10 +266,74 @@ exports.getRegisteredCounselors = async (req, res) => {
       .select('_id name email department phone')
       .lean();
 
+    const counselorIds = counselors.map((c) => c._id);
+
+    // Calculate active assigned cases from StudentProfile
+    const profileCounts = await StudentProfile.aggregate([
+      {
+        $match: {
+          $or: [
+            { assigned_counselor_id: { $in: counselorIds } },
+            { assignedCounselor: { $in: counselorIds } },
+          ],
+          counselingStatus: { $ne: 'Resolved' },
+        },
+      },
+      {
+        $group: {
+          _id: { $ifNull: ['$assigned_counselor_id', '$assignedCounselor'] },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Calculate active sessions from CounselingSession
+    let sessionCounts = [];
+    if (CounselingSession) {
+      sessionCounts = await CounselingSession.aggregate([
+        {
+          $match: {
+            counselor: { $in: counselorIds },
+            status: { $nin: ['Resolved', 'Cancelled', 'Completed'] },
+          },
+        },
+        {
+          $group: {
+            _id: '$counselor',
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+    }
+
+    const countMap = new Map();
+    profileCounts.forEach((p) => {
+      if (p._id) countMap.set(p._id.toString(), p.count);
+    });
+    sessionCounts.forEach((s) => {
+      if (s._id) {
+        const idStr = s._id.toString();
+        const existing = countMap.get(idStr) || 0;
+        countMap.set(idStr, Math.max(existing, s.count));
+      }
+    });
+
+    const enrichedCounselors = counselors.map((c) => {
+      const activeCount = countMap.get(c._id.toString()) || 0;
+      return {
+        ...c,
+        id: c._id,
+        active_case_count: activeCount,
+        activeCaseCount: activeCount,
+        activeCasesCount: activeCount,
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      count: counselors.length,
-      counselors,
+      count: enrichedCounselors.length,
+      counselors: enrichedCounselors,
+      data: enrichedCounselors,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -267,7 +346,7 @@ exports.getRegisteredCounselors = async (req, res) => {
 exports.assignCounselorToStudent = async (req, res) => {
   try {
     const { id } = req.params;
-    const { counselorId, referralReason } = req.body;
+    const { counselorId, referralReason, notes } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(counselorId)) {
       return res.status(400).json({ success: false, message: 'Invalid Student or Counselor ID.' });
@@ -278,33 +357,76 @@ exports.assignCounselorToStudent = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Selected counselor not found.' });
     }
 
+    const logEntry = {
+      action: 'Counselor Assigned',
+      performed_by: req.user?.name || req.user?.role || 'Teacher',
+      timestamp: new Date(),
+      notes: notes || `Assigned to Counselor ${counselor.name}. Reason: ${referralReason || 'Supportive non-academic counseling initiated.'}`,
+    };
+
     const profile = await StudentProfile.findOneAndUpdate(
       { user: id },
       { 
         $set: { 
           assignedCounselor: counselor._id,
-          assignedRole: 'COUNSELOR'
-        } 
+          assigned_counselor_id: counselor._id,
+          assignedRole: 'COUNSELOR',
+          counselingStatus: 'Active Review',
+        },
+        $push: {
+          intervention_logs: logEntry,
+          qualitativeNotes: {
+            authorRole: req.user?.role || 'Teacher',
+            note: `Counselor ${counselor.name} assigned. Referral reason: ${referralReason || 'Non-academic intervention'}`,
+            category: 'Personal',
+            createdAt: new Date(),
+          },
+        },
       },
-      { new: true }
+      { new: true, upsert: true }
     );
 
-    // Create tracking session record if CounselingSession model exists
+    // Sync to student User document
+    await User.findByIdAndUpdate(id, {
+      $set: {
+        assignedCounselor: counselor._id,
+        assigned_counselor_id: counselor._id,
+      },
+    });
+
+    // Create tracking session record with student background context
     let session = null;
     if (CounselingSession) {
+      const backgroundContext = {
+        wellnessSummary: profile?.mentalHealthSelfReport || profile?.mentalHealthState || 'Moderate',
+        disengagementReason: profile?.disengagementReason || 'None',
+        financialStatus: profile?.financialStress || profile?.moneyFeeWorries || 'Stable',
+        academicSnapshot: {
+          cgpa: profile?.cgpa,
+          attendance: profile?.attendancePercentage,
+          backlogs: profile?.activeBacklogs || '0 Backlogs',
+        },
+        evaluationCase: profile?.evaluationCase || 'CASE_A_WELLNESS_DISENGAGEMENT',
+      };
+
       session = await CounselingSession.create({
         student: id,
         assignedBy: req.user?._id,
         counselor: counselor._id,
         riskCategory: profile?.riskCategory || 'General Intervention',
         reasonForReferral: referralReason || 'Referred for specialized non-academic intervention.',
+        notes: `Referred by ${req.user?.name || 'Faculty'}. Supportive counseling initiated.`,
+        status: 'Assigned',
+        studentBackgroundContext: backgroundContext,
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: `Successfully assigned Counselor ${counselor.name} to student.`,
+      message: `Successfully assigned Counselor ${counselor.name} to student and created counseling log.`,
+      counselor: { _id: counselor._id, name: counselor.name, email: counselor.email },
       session,
+      intervention_logs: profile.intervention_logs,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -320,37 +442,60 @@ exports.assignCounselor = exports.assignCounselorToStudent;
 exports.applyCollegeFinancialAid = async (req, res) => {
   try {
     const { id } = req.params;
-    const { requestedAmount, notes } = req.body;
+    const { requestedAmount, amount, notes, reason } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: 'Invalid Student ID.' });
     }
 
+    const grantAmount = Number(requestedAmount || amount) || 5000;
+
+    const logEntry = {
+      action: 'College Fund Requested',
+      performed_by: req.user?.name || req.user?.role || 'Teacher',
+      timestamp: new Date(),
+      notes: `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: ${notes || 'Pending institutional review.'}`,
+    };
+
     const profile = await StudentProfile.findOneAndUpdate(
       { user: id },
       {
         $set: {
-          'collegeFinancialAid.status': 'Approved',
-          'collegeFinancialAid.grantAmount': Number(requestedAmount) || 5000,
-          'collegeFinancialAid.approvedAt': new Date(),
+          'collegeFinancialAid.status': 'Pending Institutional Support',
+          'collegeFinancialAid.grantAmount': grantAmount,
+          'collegeFinancialAid.appliedAt': new Date(),
+          financialAidStatus: 'Pending Institutional Support',
+          financial_relief_status: 'REQUESTED',
           assignedRole: 'FINANCIAL_AID',
         },
         $push: {
+          intervention_logs: logEntry,
           qualitativeNotes: {
-            authorRole: 'Teacher',
-            note: `Approved College Financial Aid Grant of ₹${requestedAmount || 5000}. Notes: ${notes || 'College aid disbursed.'}`,
+            authorRole: req.user?.role || 'Teacher',
+            note: `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: ${notes || 'Pending institutional review.'}`,
             category: 'Financial',
             createdAt: new Date(),
-          }
-        }
+          },
+        },
       },
-      { new: true }
+      { new: true, upsert: true }
     );
+
+    // Sync to student User document
+    await User.findByIdAndUpdate(id, {
+      $set: {
+        financialAidStatus: 'Pending Institutional Support',
+        financial_relief_status: 'REQUESTED',
+      },
+    });
 
     return res.status(200).json({
       success: true,
-      message: 'College financial aid approved and allocated to student account.',
+      message: 'College financial aid request submitted. Marked as Pending Institutional Support.',
       financialAid: profile?.collegeFinancialAid,
+      financialAidStatus: profile?.financialAidStatus,
+      financial_relief_status: profile?.financial_relief_status,
+      intervention_logs: profile.intervention_logs,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -429,7 +574,7 @@ exports.evaluateStudentRisk = async (req, res) => {
       surveyData: profile.surveyData || {},
     };
 
-    // 4. Delegate risk analysis to Gemini AI Service
+    // 4. Delegate risk analysis to Gemini AI Service / Decision Matrix
     const aiResult = await evaluateStudentRiskWithGemini(evaluationPayload);
 
     // 5. Update Profile & User documents with standard AI results
@@ -437,27 +582,58 @@ exports.evaluateStudentRisk = async (req, res) => {
     profile.riskCategory = aiResult.riskCategory;
     profile.primaryRiskCategory = aiResult.primaryRiskCategory;
     profile.assignedRole = aiResult.assignedRole;
+    profile.evaluationCase = aiResult.evaluationCase;
+    profile.nonAcademicRisk = aiResult.nonAcademicRisk;
+    profile.recommendedActions = aiResult.recommendedActions;
     profile.aiRecommendations = aiResult.aiRecommendations;
     profile.riskEvaluated = true;
     profile.lastAiAnalysisDate = new Date();
-    profile.lastEvaluatedAt = new Date();
+    profile.evaluation_source = 'AUTOMATED_AI';
+
+    // Push audit entry to intervention_logs
+    if (!profile.intervention_logs) profile.intervention_logs = [];
+    profile.intervention_logs.push({
+      action: `AI Risk Evaluated: ${aiResult.riskLevel}`,
+      performed_by: req.user?.name || req.user?.role || 'Teacher',
+      timestamp: new Date(),
+      notes: `Evaluated Case: ${aiResult.evaluationCase}. Category: ${aiResult.riskCategory}. Role: ${aiResult.assignedRole}`,
+    });
+
+    // Automated Workflow Case B: Mark Pending Institutional Support
+    if (aiResult.evaluationCase === 'CASE_B_FINANCIAL_STRESS') {
+      profile.financialAidStatus = 'Pending Institutional Support';
+      profile.financial_relief_status = 'REQUESTED';
+      profile.collegeFinancialAid.status = 'Pending Institutional Support';
+      if (!profile.collegeFinancialAid.appliedAt) {
+        profile.collegeFinancialAid.appliedAt = new Date();
+      }
+    }
 
     if (user) {
       user.riskLevel = aiResult.riskLevel;
       await user.save();
     }
 
+    profile.markModified('surveyData');
+    profile.markModified('recommendedActions');
+    profile.markModified('nonAcademicRisk');
+    profile.markModified('collegeFinancialAid');
     await profile.save();
 
     return res.status(200).json({
       success: true,
-      message: `AI Evaluation completed successfully. Assigned to ${aiResult.assignedRole} for ${aiResult.riskCategory}.`,
+      message: `AI Evaluation completed successfully. Assigned to ${aiResult.assignedRole} for ${aiResult.riskCategory}. Workflow: ${aiResult.evaluationCase}`,
       student: {
         _id: user?._id || profile.user,
         riskLevel: profile.riskLevel,
         riskCategory: profile.riskCategory,
         primaryRiskCategory: profile.primaryRiskCategory,
         assignedRole: profile.assignedRole,
+        evaluationCase: profile.evaluationCase,
+        nonAcademicRisk: profile.nonAcademicRisk,
+        recommendedActions: profile.recommendedActions,
+        financialAidStatus: profile.financialAidStatus,
+        collegeFinancialAid: profile.collegeFinancialAid,
         aiRecommendations: profile.aiRecommendations,
       },
       evaluation: aiResult,

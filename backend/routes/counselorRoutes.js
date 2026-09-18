@@ -39,8 +39,9 @@ router.get('/cases', getCounselorCases);
 // POST /api/counselor/students/:id/intervention - Add qualitative note / action step to student profile
 router.post('/students/:id/intervention', logInterventionNote);
 
-// PUT /api/counselor/students/:id/status - Update intervention status (e.g. In Review, Resolved)
+// PUT/PATCH /api/counselor/students/:id/status - Update intervention status (e.g. In Review, Resolved)
 router.put('/students/:id/status', updateCaseStatus);
+router.patch('/students/:id/status', updateCaseStatus);
 
 // --- DETAILED COUNSELING SESSIONS ---
 

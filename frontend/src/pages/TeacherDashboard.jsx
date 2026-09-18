@@ -9,14 +9,17 @@ import {
   deleteStudent,
   changeTeacherPassword,
   assignAcademicPlan,
-  assignCounselorToStudent, // Endpoint for assigning/referring counselors
+  assignCounselorToStudent,
+  requestCollegeFund,
 } from '../services/teacherService';
 import TeacherStats from '../components/TeacherStats';
 import StudentRosterTable from '../components/StudentRosterTable';
 import RecordEntryModal from '../components/RecordEntryModal';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import AcademicPlanModal from '../components/AcademicPlanModal';
-import CounselorReferralModal from '../components/CounselorReferralModal'; // Modal for session & counselor scheduling
+import CounselorAssignmentModal from '../components/CounselorAssignmentModal';
+import StudentDetailModal from '../components/StudentDetailModal';
+import GrantFinancialAidModal from '../components/GrantFinancialAidModal';
 
 const YEAR_OPTIONS = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
 
@@ -37,9 +40,13 @@ const TeacherDashboard = () => {
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isAcademicPlanModalOpen, setIsAcademicPlanModalOpen] = useState(false);
   const [isCounselorModalOpen, setIsCounselorModalOpen] = useState(false);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isFinancialAidModalOpen, setIsFinancialAidModalOpen] = useState(false);
   
   const [selectedStudentForPlan, setSelectedStudentForPlan] = useState(null);
   const [selectedStudentForCounselor, setSelectedStudentForCounselor] = useState(null);
+  const [selectedStudentForDetail, setSelectedStudentForDetail] = useState(null);
+  const [selectedStudentForAid, setSelectedStudentForAid] = useState(null);
   const [feedback, setFeedback] = useState(null);
 
   // Fetch Class Roster & Synchronize Local Overrides
@@ -230,59 +237,55 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Open Counselor Referral Modal
+  // Open Student Detail Panel
+  const handleOpenDetailModal = (student) => {
+    setSelectedStudentForDetail(student);
+    setIsDetailModalOpen(true);
+  };
+
+  // Open Financial Aid / College Fund Modal
+  const handleOpenFinancialAidModal = (student) => {
+    setSelectedStudentForAid(student);
+    setIsFinancialAidModalOpen(true);
+  };
+
+  // Submit Emergency Financial Aid / College Fund Grant
+  const handleSaveFinancialAid = async (studentId, { amount, reason }) => {
+    try {
+      await requestCollegeFund(studentId, { amount, reason });
+      await loadData();
+      showFeedback(`Emergency College Fund request recorded. Status marked as "Pending Institutional Support".`);
+      setIsFinancialAidModalOpen(false);
+
+      if (selectedStudentForDetail && (selectedStudentForDetail._id === studentId || selectedStudentForDetail.id === studentId)) {
+        setSelectedStudentForDetail((prev) => ({
+          ...prev,
+          financialAidStatus: 'Pending Institutional Support',
+          collegeFinancialAid: { ...(prev?.collegeFinancialAid || {}), status: 'Pending Institutional Support' },
+        }));
+      }
+    } catch (err) {
+      setError(`Failed to request college fund: ${err.message}`);
+    }
+  };
+
+  // Open Counselor Assignment Modal
   const handleOpenCounselorModal = (student) => {
     setSelectedStudentForCounselor(student);
     setIsCounselorModalOpen(true);
   };
 
-  // Submit Counselor Referral / Session Scheduling
-  const handleSaveCounselorReferral = async (referralData) => {
-    try {
-      const studentId = selectedStudentForCounselor?._id || selectedStudentForCounselor?.id;
-
-      if (typeof assignCounselorToStudent === 'function') {
-        await assignCounselorToStudent({
-          studentId,
-          counselorId: referralData.counselorId,
-          reasonForReferral: referralData.reasonForReferral,
-          notes: referralData.notes,
-          category: referralData.category || selectedStudentForCounselor?.primaryRiskCategory || 'General Support',
-          riskCategory: selectedStudentForCounselor?.primaryRiskCategory || 'General Support',
-        });
-      }
-
-      // Persist in localStorage for continuous UI response
-      try {
-        const localCounseling = JSON.parse(localStorage.getItem('assigned_counseling_sessions') || '{}');
-        localCounseling[studentId] = {
-          counselorId: referralData.counselorId,
-          assignedAt: new Date(),
-          status: 'Assigned',
-        };
-        localStorage.setItem('assigned_counseling_sessions', JSON.stringify(localCounseling));
-      } catch (e) {
-        console.error('Failed to update local storage:', e);
-      }
-
-      setStudents((prevStudents) =>
-        prevStudents.map((s) => {
-          const isTarget = s._id === studentId || s.id === studentId || s.studentId === studentId;
-          if (!isTarget) return s;
-
-          return {
-            ...s,
-            counselorAssigned: true,
-            counselingStatus: 'Referral Dispatched',
-            assignedCounselor: referralData.counselorId,
-          };
-        })
-      );
-
-      showFeedback(`Counseling referral successfully initiated for ${selectedStudentForCounselor?.name || 'student'}.`);
-      setIsCounselorModalOpen(false);
-    } catch (err) {
-      setError(`Failed to dispatch counseling referral: ${err.message}`);
+  // Counselor Assignment Success Callback
+  const handleCounselorAssignSuccess = async ({ studentId, counselor }) => {
+    await loadData();
+    showFeedback(`Counselor ${counselor?.name || 'Faculty Counselor'} successfully assigned. Counseling log created.`);
+    setIsCounselorModalOpen(false);
+    if (selectedStudentForDetail && (selectedStudentForDetail._id === studentId || selectedStudentForDetail.id === studentId)) {
+      setSelectedStudentForDetail((prev) => ({
+        ...prev,
+        assignedCounselor: counselor?._id || counselor?.id,
+        counselorAssigned: true,
+      }));
     }
   };
 
@@ -419,9 +422,28 @@ const TeacherDashboard = () => {
             onAcademicIntervention={handleOpenAcademicPlan}
             onAssignPlan={handleOpenAcademicPlan}
             onAssignCounselor={handleOpenCounselorModal}
+            onOpenDetailModal={handleOpenDetailModal}
+            onGrantFinancialAid={handleOpenFinancialAidModal}
           />
         </div>
       </main>
+
+      {/* Student Detail Panel */}
+      <StudentDetailModal
+        student={selectedStudentForDetail}
+        isOpen={isDetailModalOpen}
+        onClose={() => setIsDetailModalOpen(false)}
+        onOpenCounselorModal={(s) => {
+          setSelectedStudentForCounselor(s);
+          setIsCounselorModalOpen(true);
+        }}
+        onOpenAcademicPlanModal={(s) => {
+          setSelectedStudentForPlan(s);
+          setIsAcademicPlanModalOpen(true);
+        }}
+        onEvaluateRisk={handleEvaluateRisk}
+        onUpdateSuccess={loadData}
+      />
 
       {/* Academic Record Entry Modal */}
       <RecordEntryModal
@@ -439,13 +461,20 @@ const TeacherDashboard = () => {
         onSubmitPlan={handleSaveAcademicPlan}
       />
 
-      {/* Counselor Referral Modal */}
-      {isCounselorModalOpen && (
-        <CounselorReferralModal
-          student={selectedStudentForCounselor}
-          isOpen={isCounselorModalOpen}
-          onClose={() => setIsCounselorModalOpen(false)}
-          onSubmit={handleSaveCounselorReferral}
+      {/* Counselor Assignment Modal (Dynamic directory from /api/counselors) */}
+      <CounselorAssignmentModal
+        student={selectedStudentForCounselor}
+        isOpen={isCounselorModalOpen}
+        onClose={() => setIsCounselorModalOpen(false)}
+        onAssignSuccess={handleCounselorAssignSuccess}
+      />
+
+      {/* College Emergency Fund / Financial Aid Modal */}
+      {isFinancialAidModalOpen && (
+        <GrantFinancialAidModal
+          student={selectedStudentForAid}
+          onClose={() => setIsFinancialAidModalOpen(false)}
+          onSubmit={handleSaveFinancialAid}
         />
       )}
 

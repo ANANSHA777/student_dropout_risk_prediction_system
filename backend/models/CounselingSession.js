@@ -106,6 +106,18 @@ const counselingSessionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // --- STUDENT BACKGROUND CONTEXT ---
+    studentBackgroundContext: {
+      wellnessSummary: { type: String, default: '' },
+      disengagementReason: { type: String, default: '' },
+      financialStatus: { type: String, default: '' },
+      academicSnapshot: {
+        cgpa: { type: Number, default: null },
+        attendance: { type: Number, default: null },
+        backlogs: { type: String, default: '' },
+      },
+      evaluationCase: { type: String, default: '' },
+    },
   },
   {
     timestamps: true,

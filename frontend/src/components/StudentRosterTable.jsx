@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   DollarSign,
   ShieldCheck,
+  Eye,
 } from 'lucide-react';
 
 // --- HELPERS ---
@@ -223,6 +224,7 @@ function StudentRosterRow({
   onAcademicIntervention,
   onAssignPlan,
   onGrantFinancialAid,
+  onOpenDetailModal,
 }) {
   const {
     studentDbId,
@@ -267,12 +269,32 @@ function StudentRosterRow({
     return 'Disabled: Waiting for Student Survey Submission';
   };
 
+  const evalCase = student.evaluationCase || '';
+  const isCaseA = evalCase === 'CASE_A_WELLNESS_DISENGAGEMENT' || 
+                  student.recommendedActions?.suppressAcademicPenalty ||
+                  (evaluationAnalysis.showCounselorBtn && !evaluationAnalysis.showFinancialAidOption);
+  const isCaseB = evalCase === 'CASE_B_FINANCIAL_STRESS' ||
+                  student.recommendedActions?.requestCollegeFund ||
+                  (evaluationAnalysis.showFinancialAidOption);
+  const isPendingInstitutionalSupport = 
+    student.financialAidStatus === 'Pending Institutional Support' || 
+    student.collegeFinancialAid?.status === 'Pending Institutional Support';
+
   return (
     <tr className="hover:bg-slate-800/30 transition-colors">
       {/* Student Info */}
       <td className="py-4 px-5">
-        <div className="font-bold text-slate-100">{student.name}</div>
-        <div className="text-xs text-slate-400">{student.email}</div>
+        <button
+          type="button"
+          onClick={() => onOpenDetailModal && onOpenDetailModal(student)}
+          className="text-left group cursor-pointer"
+        >
+          <div className="font-bold text-slate-100 group-hover:text-indigo-300 transition flex items-center gap-1.5">
+            <span>{student.name}</span>
+            <Eye size={12} className="opacity-0 group-hover:opacity-100 text-indigo-400 transition" />
+          </div>
+          <div className="text-xs text-slate-400">{student.email}</div>
+        </button>
       </td>
 
       {/* ID / Year */}
@@ -344,66 +366,140 @@ function StudentRosterRow({
         )}
       </td>
 
-      {/* Recommended Interventions (Phase 5 Workflow Dynamic Buttons) */}
+      {/* Recommended Interventions (Teacher view) OR Actions Logged (Admin view) */}
       <td className="py-4 px-5">
-        {isRiskEvaluated ? (
-          <div className="flex flex-col gap-2 min-w-[170px] max-w-[220px]">
-            
-            {/* 1. Academic Plan Intervention */}
-            {assignedPlan ? (
-              <div className="bg-emerald-950/50 border border-emerald-500/40 p-2 rounded-lg flex flex-col gap-1">
-                <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
-                  <Check size={13} className="text-emerald-400 shrink-0" />
-                  <span className="line-clamp-1">Assigned: {planTitle}</span>
+        {!showActions ? (
+          /* ADMIN VIEW: ACTIONS LOGGED */
+          <div className="space-y-2 min-w-[170px] max-w-[240px]">
+            {student.intervention_logs && student.intervention_logs.length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                  <span className="truncate">
+                    {student.intervention_logs[student.intervention_logs.length - 1].action}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 line-clamp-1">
+                  {student.intervention_logs[student.intervention_logs.length - 1].notes ||
+                    `By ${student.intervention_logs[student.intervention_logs.length - 1].performed_by || 'Staff'}`}
                 </div>
               </div>
-            ) : showActions && evaluationAnalysis.showAcademicPlanBtn ? (
-              <button
-                type="button"
-                onClick={handleAcademicPlanClick}
-                className="h-8 w-full px-3 bg-amber-900/30 text-amber-200 border border-amber-500/40 hover:bg-amber-800/40 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <BookOpen size={13} className="text-amber-300 shrink-0" />
-                <span>Academic Plan</span>
-              </button>
-            ) : null}
-
-            {/* 2. Counselor Assignment Intervention */}
-            {showActions && evaluationAnalysis.showCounselorBtn && !assignedCounselor && (
-              <button
-                type="button"
-                onClick={() => onAssignCounselor && onAssignCounselor(student)}
-                className="h-8 w-full px-3 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <UserCheck size={13} className="text-purple-300 shrink-0" />
-                <span>Assign Counselor</span>
-              </button>
-            )}
-
-            {assignedCounselor && (
-              <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded border border-purple-800/40">
+            ) : assignedCounselor ? (
+              <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
                 <UserCheck size={12} className="text-purple-400 shrink-0" />
                 <span className="truncate">Counselor Assigned</span>
               </div>
+            ) : isPendingInstitutionalSupport ? (
+              <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                <DollarSign size={12} className="text-emerald-400 shrink-0" />
+                <span className="truncate">College Fund Requested</span>
+              </div>
+            ) : isRiskEvaluated ? (
+              <span className="text-xs text-slate-400 italic">No interventions logged</span>
+            ) : (
+              <span className="text-xs text-slate-500 italic">Pending Evaluation</span>
             )}
 
-            {/* 3. College Financial Fund Intervention */}
-            {showActions && evaluationAnalysis.showFinancialAidOption && (
-              <button
-                type="button"
-                onClick={() => onGrantFinancialAid ? onGrantFinancialAid(student) : onAssignCounselor && onAssignCounselor(student)}
-                className="h-8 w-full px-3 bg-emerald-900/40 text-emerald-200 border border-emerald-500/50 hover:bg-emerald-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <DollarSign size={13} className="text-emerald-300 shrink-0" />
-                <span>Provide College Fund</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => onOpenDetailModal && onOpenDetailModal(student)}
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 transition cursor-pointer bg-slate-800/70 hover:bg-slate-800 px-2 py-1 rounded border border-slate-700/60"
+            >
+              <Eye size={12} />
+              <span>Details & Audit Log</span>
+            </button>
+          </div>
+        ) : isRiskEvaluated ? (
+          /* TEACHER VIEW: RECOMMENDED INTERVENTIONS */
+          <div className="flex flex-col gap-2 min-w-[170px] max-w-[220px]">
+            {/* Case A: Lack of Interest / Mental Health / Disengagement (Strict Isolation) */}
+            {isCaseA ? (
+              <div className="space-y-1.5">
+                {assignedCounselor ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
+                    <UserCheck size={12} className="text-purple-400 shrink-0" />
+                    <span className="truncate">Counselor Assigned</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
+                    className="h-8 w-full px-3 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Case A: Supportive Counseling Protocol (Academic Penalty Suppressed)"
+                  >
+                    <UserCheck size={13} className="text-purple-300 shrink-0" />
+                    <span>Assign Counselor</span>
+                  </button>
+                )}
+                <div className="text-[10px] text-purple-300/80 font-medium">
+                  Supportive Counseling Priority
+                </div>
+              </div>
+            ) : isCaseB ? (
+              /* Case B: Student has Interest, but cannot study due to Financial Issues */
+              <div className="space-y-1.5">
+                {isPendingInstitutionalSupport ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <DollarSign size={12} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Pending Support</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onGrantFinancialAid && onGrantFinancialAid(student)}
+                    className="h-8 w-full px-2.5 bg-emerald-900/40 text-emerald-200 border border-emerald-500/50 hover:bg-emerald-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <DollarSign size={13} className="text-emerald-300 shrink-0" />
+                    <span>Request College Fund</span>
+                  </button>
+                )}
 
-            {/* 4. Normal Monitoring */}
-            {!evaluationAnalysis.showAcademicPlanBtn && !evaluationAnalysis.showCounselorBtn && !evaluationAnalysis.showFinancialAidOption && !assignedPlan && (
-              <span className="text-xs text-slate-400 italic">Standard Monitoring</span>
-            )}
+                {/* Assign Counselor button next to / alongside Request College Fund */}
+                {assignedCounselor ? (
+                  <div className="inline-flex items-center gap-1.5 text-[11px] text-purple-300 bg-purple-950/30 px-2 py-1 rounded border border-purple-800/30 w-full">
+                    <UserCheck size={11} className="text-purple-400 shrink-0" />
+                    <span className="truncate">Counselor Assigned</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
+                    className="h-7 w-full px-2 bg-purple-950/40 text-purple-300 border border-purple-700/40 hover:bg-purple-900/50 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
+                    title="Assign Counselor to support student"
+                  >
+                    <UserCheck size={12} className="text-purple-400 shrink-0" />
+                    <span>Assign Counselor</span>
+                  </button>
+                )}
 
+                <div className="text-[10px] text-emerald-300/80 font-medium">
+                  Financial Relief Track
+                </div>
+              </div>
+            ) : (
+              /* Case C: Purely Academic Concerns */
+              <div className="space-y-1">
+                {assignedPlan ? (
+                  <div className="bg-emerald-950/50 border border-emerald-500/40 p-2 rounded-lg flex flex-col gap-1">
+                    <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+                      <Check size={13} className="text-emerald-400 shrink-0" />
+                      <span className="line-clamp-1">Assigned: {planTitle}</span>
+                    </div>
+                  </div>
+                ) : evaluationAnalysis.showAcademicPlanBtn ? (
+                  <button
+                    type="button"
+                    onClick={handleAcademicPlanClick}
+                    className="h-8 w-full px-3 bg-amber-900/30 text-amber-200 border border-amber-500/40 hover:bg-amber-800/40 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <BookOpen size={13} className="text-amber-300 shrink-0" />
+                    <span>Academic Plan</span>
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-400 italic">Standard Monitoring</span>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <span className="text-xs text-slate-500 italic">Awaiting AI Evaluation</span>
@@ -414,14 +510,25 @@ function StudentRosterRow({
       {showActions && (
         <td className="py-4 px-5 text-right">
           <div className="flex items-center justify-end gap-2">
+            {/* DETAIL PANEL BUTTON */}
+            <button
+              type="button"
+              onClick={() => onOpenDetailModal && onOpenDetailModal(student)}
+              className="h-8 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
+              title="View Full Profile & Student Detail Panel"
+            >
+              <Eye size={13} className="text-indigo-400 shrink-0" />
+              <span>Details</span>
+            </button>
+
             <button
               type="button"
               onClick={() => onOpenRecordModal && onOpenRecordModal(student)}
-              className="h-8 px-3 bg-[#1e1c3b] hover:bg-[#28254f] text-[#a5b4fc] border border-[#3b3566] rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
+              className="h-8 px-2.5 bg-[#1e1c3b] hover:bg-[#28254f] text-[#a5b4fc] border border-[#3b3566] rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
               title="Edit Marks"
             >
               <Edit3 size={13} className="text-[#818cf8] shrink-0" />
-              <span>Edit Marks</span>
+              <span>Marks</span>
             </button>
 
             {/* AI EVALUATE BUTTON */}
@@ -430,7 +537,7 @@ function StudentRosterRow({
               onClick={() => onEvaluateRisk && onEvaluateRisk(studentDbId)}
               disabled={!canEvaluate || isEvaluatingThisStudent}
               title={getEvaluateTooltip()}
-              className={`h-8 px-3 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
                 canEvaluate
                   ? 'bg-[#26180b] hover:bg-[#38220f] text-[#fde047] border border-[#78350f] cursor-pointer shadow-sm active:scale-95'
                   : 'bg-slate-900/50 text-slate-600 border border-slate-800 cursor-not-allowed opacity-50'
@@ -470,6 +577,7 @@ export default function StudentRosterTable({
   onAcademicIntervention,
   onAssignPlan,
   onGrantFinancialAid,
+  onOpenDetailModal,
   showActions = true,
 }) {
   const totalColumns = showActions ? 7 : 6;
@@ -519,6 +627,7 @@ export default function StudentRosterTable({
                   onAcademicIntervention={onAcademicIntervention}
                   onAssignPlan={onAssignPlan}
                   onGrantFinancialAid={onGrantFinancialAid}
+                  onOpenDetailModal={onOpenDetailModal}
                 />
               ))
             )}

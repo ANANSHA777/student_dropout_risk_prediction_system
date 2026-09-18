@@ -175,9 +175,10 @@ const getOverallRiskAnalytics = async (req, res) => {
       const stats = analytics[dept][year];
       stats.total += 1;
 
-      if (student.riskLevel === 'High') stats.highRisk += 1;
-      else if (student.riskLevel === 'Medium') stats.mediumRisk += 1;
-      else if (student.riskLevel === 'Low') stats.lowRisk += 1;
+      const r = String(student.riskLevel || '').toLowerCase();
+      if (r.includes('high')) stats.highRisk += 1;
+      else if (r.includes('medium') || r.includes('moderate')) stats.mediumRisk += 1;
+      else if (r.includes('low') || r.includes('safe')) stats.lowRisk += 1;
       else stats.unevaluated += 1;
     });
 
@@ -215,6 +216,7 @@ const getFilteredStudentsForAdmin = async (req, res) => {
       const profile = profileMap.get(user._id.toString()) || {};
       return {
         _id: user._id,
+        id: user._id,
         name: user.name,
         email: user.email,
         studentId: profile.studentId || user.studentId || '',
@@ -222,8 +224,26 @@ const getFilteredStudentsForAdmin = async (req, res) => {
         yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
         cgpa: profile.cgpa ?? user.cgpa ?? null,
         attendance: profile.attendancePercentage ?? user.attendance ?? null,
+        attendancePercentage: profile.attendancePercentage ?? user.attendance ?? null,
         surveyCompleted: Boolean(profile.surveyCompleted || user.surveyCompleted),
         riskLevel: profile.riskLevel || user.riskLevel || null,
+        riskCategory: profile.riskCategory || 'None',
+        primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
+        evaluationCase: profile.evaluationCase || 'NONE',
+        nonAcademicRisk: profile.nonAcademicRisk || {},
+        recommendedActions: profile.recommendedActions || {},
+        financialAidStatus: profile.financialAidStatus || 'Paid',
+        financial_relief_status: profile.financial_relief_status || (profile.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE'),
+        collegeFinancialAid: profile.collegeFinancialAid || {},
+        assignedCounselor: profile.assignedCounselor || profile.assigned_counselor_id || null,
+        assigned_counselor_id: profile.assigned_counselor_id || profile.assignedCounselor || null,
+        counselingStatus: profile.counselingStatus || 'Active Review',
+        assignedAcademicPlan: profile.assignedAcademicPlan || profile.academicPlan || null,
+        academicPlan: profile.academicPlan || profile.assignedAcademicPlan || null,
+        academicInterventionPlan: profile.academicInterventionPlan || null,
+        intervention_logs: profile.intervention_logs || [],
+        qualitativeNotes: profile.qualitativeNotes || [],
+        surveyData: profile.surveyData || {},
       };
     });
 
