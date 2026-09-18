@@ -10,6 +10,10 @@ import {
   LogOut,
   CheckCircle2,
   Clock,
+  HeartHandshake,
+  UserCheck,
+  DollarSign,
+  Activity,
 } from 'lucide-react';
 import { changePassword } from '../services/authService';
 import ChangePasswordModal from '../components/ChangePasswordModal';
@@ -92,6 +96,25 @@ export default function StudentDashboard() {
 
   const isEvaluated = profile.riskEvaluated || (profile.riskLevel && profile.riskLevel !== 'Unevaluated');
 
+  // Normalize risk display cleanly (avoid duplicate "Risk Risk" and handle case-insensitive matching)
+  const rawRisk = profile.riskLevel || 'Unevaluated';
+  const isHighRisk = rawRisk.toLowerCase().includes('high');
+  const isMediumRisk = rawRisk.toLowerCase().includes('medium');
+  const isLowRisk = rawRisk.toLowerCase().includes('low');
+
+  const cleanRiskLevel = isHighRisk
+    ? 'High Risk'
+    : isMediumRisk
+    ? 'Medium Risk'
+    : isLowRisk
+    ? 'Low Risk'
+    : rawRisk;
+
+  const hasCounselor = Boolean(profile.assignedCounselorName || profile.counselorName);
+  const hasFinancialRelief = (profile.financial_relief_status && profile.financial_relief_status !== 'NONE') ||
+    (profile.financialAidStatus === 'Pending Institutional Support');
+  const hasInterventions = Array.isArray(profile.intervention_logs) && profile.intervention_logs.length > 0;
+
   return (
     <div className="min-h-screen bg-slate-950 p-6 md:p-8 text-slate-100">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -154,11 +177,13 @@ export default function StudentDashboard() {
             {isEvaluated ? (
               <AlertTriangle
                 className={
-                  profile.riskLevel === 'High'
+                  isHighRisk
                     ? 'text-red-400'
-                    : profile.riskLevel === 'Medium'
+                    : isMediumRisk
                     ? 'text-amber-400'
-                    : 'text-emerald-400'
+                    : isLowRisk
+                    ? 'text-emerald-400'
+                    : 'text-indigo-400'
                 }
                 size={32}
               />
@@ -167,11 +192,11 @@ export default function StudentDashboard() {
             )}
 
             <div>
-              <div className="text-xs text-slate-400 font-medium">Academic Risk Status</div>
+              <div className="text-xs text-slate-400 font-medium">Overall Risk Status</div>
               {isEvaluated ? (
                 <div>
-                  <div className="text-xl font-bold text-white">{profile.riskLevel} Risk</div>
-                  {profile.riskCategory && (
+                  <div className="text-xl font-bold text-white">{cleanRiskLevel}</div>
+                  {profile.riskCategory && profile.riskCategory !== 'None' && profile.riskCategory !== 'NONE' && (
                     <div className="text-[11px] text-indigo-300 font-medium mt-0.5">
                       Category: {profile.riskCategory}
                     </div>
@@ -185,6 +210,96 @@ export default function StudentDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Active Support Status & Institutional Care */}
+        {(hasCounselor || hasFinancialRelief || hasInterventions) && (
+          <div className="bg-slate-900 border border-indigo-500/20 rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
+                <HeartHandshake className="text-indigo-400" size={20} />
+                Active Support Status & Student Care
+              </h2>
+              <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 font-medium">
+                Institutional Care Active
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Counselor Support Card */}
+              {hasCounselor && (
+                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-start gap-3">
+                  <UserCheck className="text-indigo-400 mt-0.5 shrink-0" size={22} />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      Assigned Counselor
+                    </div>
+                    <div className="text-base font-bold text-white mt-0.5">
+                      {profile.assignedCounselorName || profile.counselorName}
+                    </div>
+                    <div className="text-xs text-indigo-300 font-medium mt-1">
+                      Case Status: <span className="text-slate-200">{profile.counselingStatus || 'Active Review'}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Your assigned counselor is available for confidential guidance and wellness support.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Financial Aid Card */}
+              {hasFinancialRelief && (
+                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-start gap-3">
+                  <DollarSign className="text-emerald-400 mt-0.5 shrink-0" size={22} />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      College Financial Relief Fund
+                    </div>
+                    <div className="text-base font-bold text-white mt-0.5">
+                      {profile.financial_relief_status === 'APPROVED'
+                        ? 'Approved'
+                        : profile.financial_relief_status === 'DISBURSED'
+                        ? 'Disbursed'
+                        : 'Application Under Review'}
+                    </div>
+                    <div className="text-xs text-emerald-300 font-medium mt-1">
+                      Status: {profile.financial_relief_status || 'REQUESTED'}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {profile.financial_relief_status === 'APPROVED' || profile.financial_relief_status === 'DISBURSED'
+                        ? 'Emergency financial relief has been authorized by college administration.'
+                        : 'Emergency grant request has been submitted to assist with tuition and educational fees.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Latest Support Activity Timeline */}
+            {hasInterventions && (
+              <div className="border-t border-slate-800 pt-4 mt-2">
+                <div className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
+                  <Activity size={14} className="text-indigo-400" />
+                  Recent Support & Action Updates
+                </div>
+                <div className="space-y-2">
+                  {profile.intervention_logs.slice(-3).reverse().map((log, idx) => (
+                    <div key={idx} className="text-xs bg-slate-950/60 p-3 rounded-md border border-slate-800/80 flex flex-col sm:flex-row justify-between sm:items-center gap-1">
+                      <div>
+                        <span className="font-semibold text-slate-200">{log.action || 'Support Action Logged'}</span>
+                        {log.notes && (
+                          <span className="text-slate-400 ml-1.5">— {log.notes}</span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 shrink-0">
+                        {log.timestamp ? new Date(log.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Assigned Remedial Tasks */}
         {profile.assignedTasks && profile.assignedTasks.length > 0 && (

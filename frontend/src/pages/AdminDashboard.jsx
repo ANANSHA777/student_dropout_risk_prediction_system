@@ -28,6 +28,7 @@ import AddStaffModal from '../components/AddStaffModal';
 import StudentRosterTable from '../components/StudentRosterTable';
 import RiskAnalyticsCharts from '../components/RiskAnalyticsCharts';
 import ChangePasswordModal from '../components/ChangePasswordModal';
+import StudentDetailModal from '../components/StudentDetailModal';
 
 const DEPARTMENTS = ['All', 'Computer Science', 'Business', 'Mathematics', 'English', 'Architecture', 'Commerce'];
 const YEARS = ['All', '1st Year', '2nd Year', '3rd Year', '4th Year'];
@@ -58,6 +59,8 @@ export default function AdminDashboard() {
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [selectedDept, setSelectedDept] = useState('All');
   const [selectedYear, setSelectedYear] = useState('All');
+  const [selectedStudentForDetail, setSelectedStudentForDetail] = useState(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   // Load Staff Directory
   const loadStaff = async () => {
@@ -133,9 +136,9 @@ export default function AdminDashboard() {
 
         // Ensure totals are not zero when student records exist
         if (currentStats.total === 0) {
-          if (risk === 'high') currentStats.highRisk += 1;
-          else if (risk === 'medium' || risk === 'moderate') currentStats.mediumRisk += 1;
-          else if (risk === 'low' || risk === 'safe') currentStats.lowRisk += 1;
+          if (risk.includes('high')) currentStats.highRisk += 1;
+          else if (risk.includes('medium') || risk.includes('moderate')) currentStats.mediumRisk += 1;
+          else if (risk.includes('low') || risk.includes('safe') || risk.includes('normal')) currentStats.lowRisk += 1;
           else currentStats.unevaluated += 1;
 
           currentStats.total += 1;
@@ -201,6 +204,11 @@ export default function AdminDashboard() {
     const matchesDept = staffDeptFilter === 'All' || s.department === staffDeptFilter;
     return matchesTab && matchesDept;
   });
+
+  const handleOpenDetailModal = (student) => {
+    setSelectedStudentForDetail(student);
+    setIsDetailModalOpen(true);
+  };
 
   const teacherCount = staffList.filter((s) => s.role === 'Teacher').length;
   const counselorCount = staffList.filter((s) => s.role === 'Counselor').length;
@@ -458,6 +466,7 @@ export default function AdminDashboard() {
                 students={students}
                 loading={studentsLoading}
                 showActions={false}
+                onOpenDetailModal={handleOpenDetailModal}
               />
             </section>
           </div>
@@ -476,6 +485,19 @@ export default function AdminDashboard() {
         isOpen={isPasswordModalOpen}
         onClose={() => setIsPasswordModalOpen(false)}
         onChangePassword={handleChangePassword}
+      />
+
+      {/* Student Details & Audit History Modal */}
+      <StudentDetailModal
+        student={selectedStudentForDetail}
+        isOpen={isDetailModalOpen}
+        onClose={() => {
+          setIsDetailModalOpen(false);
+          setSelectedStudentForDetail(null);
+        }}
+        onUpdateSuccess={() => {
+          loadStudentAnalytics();
+        }}
       />
     </div>
   );

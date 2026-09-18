@@ -1,9 +1,13 @@
 const API_BASE_URL = '/api/counselor';
 
-const getAuthHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
-});
+const getAuthHeaders = () => {
+  const userObj = JSON.parse(localStorage.getItem('user') || '{}');
+  const token = localStorage.getItem('token') || userObj?.token || userObj?.data?.token || '';
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+};
 
 export const fetchCounselorCases = async () => {
   const res = await fetch(`${API_BASE_URL}/cases`, {
