@@ -139,6 +139,19 @@ exports.getStudentProfile = async (req, res) => {
       cleanCategory = 'Wellness & Mental Health';
     }
 
+    // Determine 14-day cooldown status
+    const cooldownPeriodMs = 14 * 24 * 60 * 60 * 1000;
+    const lastSubmission = profile.last_survey_submission_date || profile.lastSurveySubmittedAt;
+    let cooldownActive = false;
+    let daysRemaining = 0;
+    if (lastSubmission && !profile.survey_cooldown_override) {
+      const elapsed = Date.now() - new Date(lastSubmission).getTime();
+      if (elapsed < cooldownPeriodMs) {
+        cooldownActive = true;
+        daysRemaining = Math.ceil((cooldownPeriodMs - elapsed) / (24 * 60 * 60 * 1000));
+      }
+    }
+
     res.status(200).json({
       success: true,
       profile: {
@@ -147,6 +160,12 @@ exports.getStudentProfile = async (req, res) => {
         email: req.user?.email || profile.email,
         surveyCompleted: Boolean(profile.surveyCompleted),
         surveyStatus: profile.surveyCompleted ? 'Completed' : 'Pending',
+        marks_submitted: hasTeacherMetrics,
+        survey_submitted: Boolean(profile.surveyCompleted),
+        cooldownActive,
+        daysRemaining,
+        survey_cooldown_override: Boolean(profile.survey_cooldown_override),
+        last_survey_submission_date: lastSubmission,
         riskLevel: profile.riskLevel || 'Unevaluated',
         riskCategory: cleanCategory,
         primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
@@ -159,6 +178,7 @@ exports.getStudentProfile = async (req, res) => {
         financial_relief_status: profile.financial_relief_status || (profile.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE'),
         financialAidStatus: profile.financialAidStatus || 'Paid',
         collegeFinancialAid: profile.collegeFinancialAid || {},
+        financial_documents: profile.financial_documents || [],
         intervention_logs: profile.intervention_logs || [],
         canEvaluate, // Enable AI evaluate button ONLY if CGPA, Attendance, and Survey are complete
         academicInterest: normalizedSurveyData.academicInterest,
@@ -192,6 +212,25 @@ exports.submitStudentSurvey = async (req, res) => {
     const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
       ? new mongoose.Types.ObjectId(rawUserId)
       : rawUserId;
+
+    // Check 14-day cooldown unless overridden by teacher
+    const existingProfile = await StudentProfile.findOne({ user: studentId });
+    if (existingProfile) {
+      const lastSubmission = existingProfile.last_survey_submission_date || existingProfile.lastSurveySubmittedAt;
+      const cooldownPeriodMs = 14 * 24 * 60 * 60 * 1000;
+      if (lastSubmission && !existingProfile.survey_cooldown_override) {
+        const elapsed = Date.now() - new Date(lastSubmission).getTime();
+        if (elapsed < cooldownPeriodMs) {
+          const daysRemaining = Math.ceil((cooldownPeriodMs - elapsed) / (24 * 60 * 60 * 1000));
+          return res.status(429).json({
+            success: false,
+            message: `14-Day Survey Cooldown Active: You may re-submit in ${daysRemaining} day(s). Contact a teacher for re-submission bypass if needed.`,
+            cooldownActive: true,
+            daysRemaining,
+          });
+        }
+      }
+    }
 
     // Support both flat fields & nested surveyData objects in req.body
     const bodySource = req.body.surveyData || req.body;
@@ -233,6 +272,8 @@ exports.submitStudentSurvey = async (req, res) => {
       surveyCompleted: true,
       surveyStatus: 'Completed',
       lastSurveySubmittedAt: new Date(),
+      last_survey_submission_date: new Date(),
+      survey_cooldown_override: false,
 
       // Flat Survey Fields (For direct query access)
       academicInterest,
@@ -397,5 +438,60 @@ exports.evaluateStudentRisk = async (req, res) => {
       message: 'Server error running student evaluation',
       error: error.message,
     });
+  }
+};
+
+// @desc    Upload proof documents for financial relief
+// @route   POST /api/student/upload-document
+// @access  Private (Student)
+exports.uploadFinancialDocument = async (req, res) => {
+  try {
+    const rawUserId = req.user?._id || req.user?.id;
+    if (!rawUserId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: Missing user context' });
+    }
+    const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
+      ? new mongoose.Types.ObjectId(rawUserId)
+      : rawUserId;
+
+    const { filename, fileData, url } = req.body;
+    if (!filename) {
+      return res.status(400).json({ success: false, message: 'filename is required' });
+    }
+
+    const newDoc = {
+      document_id: new mongoose.Types.ObjectId().toString(),
+      filename,
+      fileData: fileData || '',
+      url: url || '',
+      uploaded_at: new Date(),
+    };
+
+    const profile = await StudentProfile.findOneAndUpdate(
+      { user: studentId },
+      {
+        $push: {
+          financial_documents: newDoc,
+          intervention_logs: {
+            action: 'Proof Document Uploaded',
+            performed_by: req.user?.name || 'Student',
+            timestamp: new Date(),
+            notes: `Student uploaded verification proof document: "${filename}".`,
+          },
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Financial document uploaded successfully.',
+      document: newDoc,
+      financial_documents: profile.financial_documents,
+      intervention_logs: profile.intervention_logs,
+    });
+  } catch (error) {
+    console.error('Error in uploadFinancialDocument:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

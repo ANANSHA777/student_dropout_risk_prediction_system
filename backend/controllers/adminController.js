@@ -214,6 +214,13 @@ const getFilteredStudentsForAdmin = async (req, res) => {
 
     let combinedStudents = students.map((user) => {
       const profile = profileMap.get(user._id.toString()) || {};
+      const resolvedCgpa = profile.cgpa ?? user.cgpa ?? null;
+      const resolvedAttendance = profile.attendancePercentage ?? profile.attendance ?? user.attendance ?? null;
+      const isSurveyDone = Boolean(profile.surveyCompleted || user.surveyCompleted);
+      const marks_submitted = resolvedCgpa !== null && resolvedAttendance !== null;
+      const survey_submitted = isSurveyDone;
+      const canEvaluate = marks_submitted && survey_submitted;
+
       return {
         _id: user._id,
         id: user._id,
@@ -222,10 +229,13 @@ const getFilteredStudentsForAdmin = async (req, res) => {
         studentId: profile.studentId || user.studentId || '',
         department: profile.department || user.department || 'Computer Science',
         yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
-        cgpa: profile.cgpa ?? user.cgpa ?? null,
-        attendance: profile.attendancePercentage ?? user.attendance ?? null,
-        attendancePercentage: profile.attendancePercentage ?? user.attendance ?? null,
-        surveyCompleted: Boolean(profile.surveyCompleted || user.surveyCompleted),
+        cgpa: resolvedCgpa,
+        attendance: resolvedAttendance,
+        attendancePercentage: resolvedAttendance,
+        marks_submitted,
+        survey_submitted,
+        canEvaluate,
+        surveyCompleted: isSurveyDone,
         riskLevel: profile.riskLevel || user.riskLevel || null,
         riskCategory: profile.riskCategory || 'None',
         primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
@@ -235,6 +245,7 @@ const getFilteredStudentsForAdmin = async (req, res) => {
         financialAidStatus: profile.financialAidStatus || 'Paid',
         financial_relief_status: profile.financial_relief_status || (profile.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE'),
         collegeFinancialAid: profile.collegeFinancialAid || {},
+        financial_documents: profile.financial_documents || [],
         assignedCounselor: profile.assignedCounselor || profile.assigned_counselor_id || null,
         assigned_counselor_id: profile.assigned_counselor_id || profile.assignedCounselor || null,
         counselingStatus: profile.counselingStatus || 'Active Review',
@@ -276,10 +287,218 @@ const getFilteredStudentsForAdmin = async (req, res) => {
   }
 };
 
+// @desc    Update student financial relief status (DOCUMENTS_REQUIRED, APPROVED, DISBURSED, REJECTED)
+// @route   POST /api/admin/financial-relief/update-status
+// @access  Private/Admin
+const updateFinancialReliefStatus = async (req, res) => {
+  try {
+    const { studentId, status, notes } = req.body;
+
+    if (!studentId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: 'studentId and status are required',
+      });
+    }
+
+    const validStatuses = ['DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const filter = mongoose.Types.ObjectId.isValid(studentId)
+      ? { $or: [{ user: studentId }, { _id: studentId }] }
+      : { studentId };
+
+    const profile = await StudentProfile.findOne(filter);
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    profile.financial_relief_status = status;
+    if (status === 'APPROVED') {
+      profile.financialAidStatus = 'Approved';
+      if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
+      profile.collegeFinancialAid.status = 'Approved';
+      profile.collegeFinancialAid.approvedAt = new Date();
+    } else if (status === 'DISBURSED') {
+      profile.financialAidStatus = 'Disbursed';
+      if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
+      profile.collegeFinancialAid.status = 'Approved';
+    } else if (status === 'REJECTED') {
+      profile.financialAidStatus = 'Rejected';
+      if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
+      profile.collegeFinancialAid.status = 'Rejected';
+    } else if (status === 'DOCUMENTS_REQUIRED') {
+      profile.financialAidStatus = 'Pending';
+      if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
+      profile.collegeFinancialAid.status = 'Pending Review';
+    }
+
+    const adminName = req.user?.name || 'Administrator';
+    const actionLabel =
+      status === 'APPROVED'
+        ? 'College Fund Approved by Admin'
+        : status === 'DISBURSED'
+        ? 'College Fund Disbursed'
+        : status === 'REJECTED'
+        ? 'College Fund Rejected by Admin'
+        : 'Financial Relief: Documents Required';
+
+    const defaultNotes =
+      status === 'APPROVED'
+        ? 'Emergency College Relief Fund approved by administration.'
+        : status === 'DISBURSED'
+        ? 'Funds allocated and disbursed to student account.'
+        : status === 'REJECTED'
+        ? 'Emergency relief application rejected following review.'
+        : 'Administration requested verification proof documents.';
+
+    profile.intervention_logs.push({
+      action: actionLabel,
+      performed_by: adminName,
+      timestamp: new Date(),
+      notes: notes || defaultNotes,
+    });
+
+    await profile.save();
+
+    // Sync User record
+    if (profile.user) {
+      await User.findByIdAndUpdate(profile.user, {
+        financial_relief_status: status,
+        financialAidStatus: profile.financialAidStatus,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Financial relief status updated to "${status}".`,
+      studentId,
+      status,
+      financial_relief_status: status,
+      intervention_logs: profile.intervention_logs,
+    });
+  } catch (error) {
+    console.error('Error in updateFinancialReliefStatus:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Export downloadable institutional risk report in CSV or JSON
+// @route   GET /api/reports/export or /api/admin/reports/export
+// @access  Private (Admin)
+const exportInstitutionReport = async (req, res) => {
+  try {
+    const { format = 'csv', department, yearOfStudy } = req.query;
+
+    const students = await User.find({ role: 'Student' }).select('-password').lean();
+    const userIds = students.map((s) => s._id);
+    const profiles = await StudentProfile.find({ user: { $in: userIds } }).lean();
+
+    const profileMap = new Map();
+    profiles.forEach((p) => {
+      if (p.user) profileMap.set(p.user.toString(), p);
+    });
+
+    let combined = students.map((user) => {
+      const profile = profileMap.get(user._id.toString()) || {};
+      const cgpa = profile.cgpa ?? user.cgpa ?? null;
+      const attendance = profile.attendancePercentage ?? user.attendance ?? null;
+      const isSurveyDone = Boolean(profile.surveyCompleted || user.surveyCompleted);
+      const marksDone = cgpa !== null && attendance !== null;
+
+      return {
+        studentId: profile.studentId || user.studentId || 'N/A',
+        name: user.name,
+        email: user.email,
+        department: profile.department || user.department || 'General',
+        yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
+        cgpa: cgpa !== null ? cgpa : 'Missing',
+        attendance: attendance !== null ? `${attendance}%` : 'Missing',
+        marksSubmitted: marksDone ? 'Yes' : 'No',
+        surveySubmitted: isSurveyDone ? 'Yes' : 'No',
+        riskLevel: profile.riskLevel || user.riskLevel || 'Unevaluated',
+        riskCategory: profile.riskCategory || 'None',
+        evaluationCase: profile.evaluationCase || 'NONE',
+        financialReliefStatus: profile.financial_relief_status || 'NONE',
+        assignedCounselor: profile.assignedCounselor ? String(profile.assignedCounselor) : 'None',
+        counselingStatus: profile.counselingStatus || 'None',
+        interventionsCount: profile.intervention_logs?.length || 0,
+        documentsCount: profile.financial_documents?.length || 0,
+      };
+    });
+
+    if (department && department !== 'All') {
+      combined = combined.filter((s) => s.department.toLowerCase() === department.toLowerCase());
+    }
+    if (yearOfStudy && yearOfStudy !== 'All') {
+      combined = combined.filter((s) => s.yearOfStudy.toLowerCase() === yearOfStudy.toLowerCase());
+    }
+
+    if (format === 'json') {
+      return res.status(200).json({ success: true, count: combined.length, data: combined });
+    }
+
+    // Generate CSV
+    const csvHeaders = [
+      'Student ID',
+      'Name',
+      'Email',
+      'Department',
+      'Year of Study',
+      'CGPA',
+      'Attendance',
+      'Marks Submitted',
+      'Survey Submitted',
+      'Risk Level',
+      'Risk Category',
+      'Evaluation Case',
+      'Financial Relief Status',
+      'Counseling Status',
+      'Interventions Count',
+      'Financial Documents Count',
+    ];
+
+    const csvRows = combined.map((s) => [
+      `"${s.studentId}"`,
+      `"${s.name}"`,
+      `"${s.email}"`,
+      `"${s.department}"`,
+      `"${s.yearOfStudy}"`,
+      `"${s.cgpa}"`,
+      `"${s.attendance}"`,
+      `"${s.marksSubmitted}"`,
+      `"${s.surveySubmitted}"`,
+      `"${s.riskLevel}"`,
+      `"${s.riskCategory}"`,
+      `"${s.evaluationCase}"`,
+      `"${s.financialReliefStatus}"`,
+      `"${s.counselingStatus}"`,
+      `"${s.interventionsCount}"`,
+      `"${s.documentsCount}"`,
+    ]);
+
+    const csvContent = [csvHeaders.join(','), ...csvRows.map((r) => r.join(','))].join('\r\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=institution_risk_report_${Date.now()}.csv`);
+    return res.status(200).send(csvContent);
+  } catch (error) {
+    console.error('Error generating report export:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getStaffMembers,
   createStaffMember,
   deleteStaffMember,
   getOverallRiskAnalytics,
   getFilteredStudentsForAdmin,
+  updateFinancialReliefStatus,
+  exportInstitutionReport,
 };

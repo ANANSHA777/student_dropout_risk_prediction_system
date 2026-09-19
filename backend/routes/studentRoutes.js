@@ -23,6 +23,10 @@ const getStudentInterventions =
   studentController.getStudentInterventions ||
   ((req, res) => res.json({ message: 'getStudentInterventions endpoint placeholder', interventions: [] }));
 
+const uploadFinancialDocument =
+  studentController.uploadFinancialDocument ||
+  ((req, res) => res.status(501).json({ message: 'uploadFinancialDocument controller missing' }));
+
 // --- STUDENT PROFILE & SURVEY ROUTES ---
 
 // GET /api/student/profile - Get profile, CGPA, attendance & evaluation status
@@ -47,6 +51,14 @@ router.post(
   protect,
   authorize('Student', 'Admin'),
   submitStudentSurvey
+);
+
+// POST /api/student/upload-document - Upload financial relief verification document
+router.post(
+  '/upload-document',
+  protect,
+  authorize('Student', 'Admin'),
+  uploadFinancialDocument
 );
 
 // GET /api/student/interventions - Fetch assigned academic plans & counselor assignments

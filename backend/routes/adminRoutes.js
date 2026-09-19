@@ -57,8 +57,8 @@ router.get('/risk-analytics', getOverallRiskAnalytics);
 router.get('/students', getFilteredStudentsForAdmin);
 
 // --- Administrative Overrides & Direct Interventions ---
-router.post('/students/:id/assign-counselor', assignCounselorAdmin);
-router.post('/students/:id/assign-plan', assignPlanAdmin);
+router.post('/financial-relief/update-status', adminController.updateFinancialReliefStatus);
+router.get('/reports/export', adminController.exportInstitutionReport);
 router.post('/students/:id/grant-financial-aid', grantFinancialAidAdmin);
 
 module.exports = router;

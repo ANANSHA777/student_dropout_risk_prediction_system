@@ -113,12 +113,12 @@ const userSchema = new mongoose.Schema(
     },
     financialAidStatus: {
       type: String,
-      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Pending Institutional Support'],
+      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Pending Institutional Support', 'Approved', 'Disbursed', 'Rejected'],
       default: 'Paid',
     },
     financial_relief_status: {
       type: String,
-      enum: ['NONE', 'REQUESTED', 'APPROVED', 'DISBURSED'],
+      enum: ['NONE', 'REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED'],
       default: 'NONE',
     },
     evaluation_source: {

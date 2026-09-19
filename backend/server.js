@@ -23,7 +23,8 @@ app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5000'], // Match Vite/React dev ports
   credentials: true 
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Healthcheck Route
 app.get('/health', (req, res) => {
@@ -48,7 +49,10 @@ app.use('/api/academic-plan', require('./routes/academicPlanRoutes'));
 // Public/Protected Counselor Directory endpoint (/api/counselors)
 const { protect: protectAuth } = require('./middleware/authMiddleware');
 const { getRegisteredCounselors } = require('./controllers/teacherController');
+const { exportInstitutionReport } = require('./controllers/adminController');
+
 app.get('/api/counselors', protectAuth, getRegisteredCounselors);
+app.get('/api/reports/export', protectAuth, exportInstitutionReport);
 
 // 404 Catch-All for API routes (Prevents HTML 404 fallback responses)
 app.use('/api', (req, res) => {

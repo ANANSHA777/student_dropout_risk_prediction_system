@@ -24,3 +24,14 @@ export const submitSelfAssessmentSurvey = async (surveyData) => {
   if (!res.ok) throw new Error(data.message || 'Failed to submit self-assessment');
   return data;
 };
+
+export const uploadFinancialDocument = async (docData) => {
+  const res = await fetch(`${API_BASE_URL}/upload-document`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(docData),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to upload document');
+  return data;
+};

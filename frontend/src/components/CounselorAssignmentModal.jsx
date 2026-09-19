@@ -24,10 +24,14 @@ export default function CounselorAssignmentModal({ student, isOpen, onClose, onA
       try {
         const res = await fetchCounselors();
         const list = res?.counselors || res?.data || (Array.isArray(res) ? res : []);
+        // Sort ascending by active_case_count for load balancing
+        const sortedList = [...list].sort(
+          (a, b) => (a.active_case_count ?? 0) - (b.active_case_count ?? 0)
+        );
         if (isMounted) {
-          setCounselors(list);
-          if (list.length > 0) {
-            setSelectedCounselorId(list[0]._id || list[0].id);
+          setCounselors(sortedList);
+          if (sortedList.length > 0) {
+            setSelectedCounselorId(sortedList[0]._id || sortedList[0].id);
           }
         }
       } catch (err) {
@@ -175,18 +179,33 @@ export default function CounselorAssignmentModal({ student, isOpen, onClose, onA
                 No counselors found in directory. Counselors can be registered by Admin.
               </div>
             ) : (
-              <select
-                value={selectedCounselorId}
-                onChange={(e) => setSelectedCounselorId(e.target.value)}
-                required
-                className="w-full bg-slate-900 border border-slate-700 text-slate-100 text-sm rounded-xl p-3 focus:outline-none focus:border-purple-500 cursor-pointer"
-              >
-                {counselors.map((c) => (
-                  <option key={c._id || c.id} value={c._id || c.id}>
-                    {c.name} — {c.department || 'Counseling Center'} ({c.email})
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-2">
+                {counselors.length > 0 && (
+                  <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-emerald-300">
+                      <Sparkles size={14} className="text-amber-400 shrink-0" />
+                      <span>
+                        Recommended: <strong className="text-white">{counselors[0].name}</strong>
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 bg-emerald-900/80 text-emerald-200 rounded-full text-[11px] font-bold border border-emerald-400/40 shrink-0">
+                      Recommended (Lowest Workload: {counselors[0].active_case_count ?? 0} active cases)
+                    </span>
+                  </div>
+                )}
+                <select
+                  value={selectedCounselorId}
+                  onChange={(e) => setSelectedCounselorId(e.target.value)}
+                  required
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-100 text-sm rounded-xl p-3 focus:outline-none focus:border-purple-500 cursor-pointer"
+                >
+                  {counselors.map((c, idx) => (
+                    <option key={c._id || c.id} value={c._id || c.id}>
+                      {c.name} — Workload: {c.active_case_count ?? 0} active cases {idx === 0 ? '★ [Recommended: Lowest Workload]' : ''} ({c.department || 'Counseling Center'})
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
           </div>
 

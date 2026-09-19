@@ -286,6 +286,37 @@ exports.updateCaseStatus = async (req, res) => {
       );
     }
 
+    // Requirement 6: Automated Risk Recovery
+    // When an assigned counselor sets case status to Resolved, check: attendance >= 75% AND CGPA >= 6.0
+    // If met, automatically set global risk status to Low Risk and append auto-recovery log
+    if (status === 'Resolved') {
+      const studentUser = await User.findById(id);
+      const currentAttendance = updatedProfile.attendancePercentage ?? studentUser?.attendance ?? 0;
+      const currentCgpa = updatedProfile.cgpa ?? studentUser?.cgpa ?? 0;
+
+      if (currentAttendance >= 75 && currentCgpa >= 6.0) {
+        const autoRecoveryLog = {
+          action: 'System Auto-Recovery: Risk updated to Low Risk',
+          performed_by: 'Automated Recovery Engine',
+          timestamp: new Date(),
+          notes: `System Auto-Recovery: Risk updated to Low Risk following case resolution and metric recovery (Attendance: ${currentAttendance}%, CGPA: ${currentCgpa}).`,
+        };
+
+        updatedProfile.riskLevel = 'Low Risk';
+        updatedProfile.riskCategory = 'None';
+        updatedProfile.primaryRiskCategory = 'NONE';
+        updatedProfile.intervention_logs.push(autoRecoveryLog);
+        await updatedProfile.save();
+
+        if (studentUser) {
+          studentUser.riskLevel = 'Low Risk';
+          studentUser.riskCategory = 'None';
+          studentUser.primaryRiskCategory = 'NONE';
+          await studentUser.save();
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: `Case status successfully updated to ${status}`,

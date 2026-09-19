@@ -15,6 +15,7 @@ import {
   DollarSign,
   ShieldCheck,
   Eye,
+  RotateCcw,
 } from 'lucide-react';
 
 // --- HELPERS ---
@@ -132,29 +133,36 @@ function resolveStudentFields(student) {
   const displayStudentId = student.studentId || student.rollNo || 'STU-101';
   const displayYear = student.yearOfStudy || student.year || '1st Year';
 
-  const cgpaVal = student.cgpa ?? null;
+  const cgpaVal = student.cgpa !== null && student.cgpa !== undefined ? student.cgpa : null;
   const attendanceVal = student.attendancePercentage ?? student.attendance ?? null;
 
-  const hasTeacherData = cgpaVal !== null && attendanceVal !== null;
-  const hasStudentSurvey =
-    student.surveyCompleted === true ||
-    student.surveyStatus === 'Completed' ||
-    student.isSurveyDone === true ||
-    Boolean(
-      student.academicInterest ||
-        student.studyHoursPerDay ||
-        student.mentalHealthSelfReport ||
-        student.surveyData ||
-        student.survey
-    );
+  const marks_submitted = student.marks_submitted !== undefined
+    ? Boolean(student.marks_submitted)
+    : (cgpaVal !== null && attendanceVal !== null);
 
-  const canEvaluate = hasTeacherData && hasStudentSurvey;
+  const survey_submitted = student.survey_submitted !== undefined
+    ? Boolean(student.survey_submitted)
+    : Boolean(
+        student.surveyCompleted === true ||
+        student.surveyStatus === 'Completed' ||
+        student.isSurveyDone === true
+      );
+
+  const hasTeacherData = marks_submitted;
+  const hasStudentSurvey = survey_submitted;
+
+  // Prerequisite Rule: Evaluation and Details require BOTH marks & survey submitted
+  const canEvaluate = marks_submitted && survey_submitted;
 
   const isRiskEvaluated =
-    student.riskEvaluated === true ||
-    (student.riskLevel &&
-      student.riskLevel !== 'Unevaluated' &&
-      student.riskLevel !== 'Pending');
+    canEvaluate &&
+    (student.riskEvaluated === true ||
+      (student.riskLevel &&
+        !['unevaluated', 'pending', 'awaiting data', 'unevaluated / awaiting data'].includes(
+          String(student.riskLevel).toLowerCase().trim()
+        )));
+
+  const canViewDetails = canEvaluate && isRiskEvaluated;
 
   const evaluationAnalysis = evaluateStudentRootCause(student);
 
@@ -185,10 +193,13 @@ function resolveStudentFields(student) {
     displayYear,
     cgpaVal,
     attendanceVal,
+    marks_submitted,
+    survey_submitted,
     hasTeacherData,
     hasStudentSurvey,
     canEvaluate,
     isRiskEvaluated,
+    canViewDetails,
     effectiveCategory,
     categoryLower,
     evaluationAnalysis,
@@ -225,6 +236,7 @@ function StudentRosterRow({
   onAssignPlan,
   onGrantFinancialAid,
   onOpenDetailModal,
+  onRequestSurveyResubmission,
 }) {
   const {
     studentDbId,
@@ -236,6 +248,7 @@ function StudentRosterRow({
     hasStudentSurvey,
     canEvaluate,
     isRiskEvaluated,
+    canViewDetails,
     effectiveCategory,
     categoryLower,
     evaluationAnalysis,
@@ -247,7 +260,8 @@ function StudentRosterRow({
     student.assignedCounselor ||
     student.counselor ||
     student.counselorAssigned ||
-    student.assignedCounselorId;
+    student.assignedCounselorId ||
+    student.assigned_counselor_id;
 
   const handleAcademicPlanClick = () => {
     const handler = onAcademicIntervention || onAssignPlan;
@@ -269,16 +283,32 @@ function StudentRosterRow({
     return 'Disabled: Waiting for Student Survey Submission';
   };
 
-  const evalCase = student.evaluationCase || '';
-  const isCaseA = evalCase === 'CASE_A_WELLNESS_DISENGAGEMENT' || 
-                  student.recommendedActions?.suppressAcademicPenalty ||
-                  (evaluationAnalysis.showCounselorBtn && !evaluationAnalysis.showFinancialAidOption);
-  const isCaseB = evalCase === 'CASE_B_FINANCIAL_STRESS' ||
-                  student.recommendedActions?.requestCollegeFund ||
-                  (evaluationAnalysis.showFinancialAidOption);
   const isPendingInstitutionalSupport = 
+    student.financial_relief_status === 'REQUESTED' ||
     student.financialAidStatus === 'Pending Institutional Support' || 
     student.collegeFinancialAid?.status === 'Pending Institutional Support';
+
+  const isDualRisk =
+    categoryLower.includes('dual') ||
+    (evaluationAnalysis.showFinancialAidOption && evaluationAnalysis.showCounselorBtn);
+
+  const isFinancialRisk =
+    categoryLower.includes('financial') ||
+    evaluationAnalysis.showFinancialAidOption ||
+    student.financial_relief_status === 'DOCUMENTS_REQUIRED' ||
+    student.financial_relief_status === 'REQUESTED';
+
+  const isCounselingRisk =
+    categoryLower.includes('wellness') ||
+    categoryLower.includes('mental') ||
+    categoryLower.includes('personal') ||
+    evaluationAnalysis.showCounselorBtn;
+
+  const isPureAcademic =
+    (categoryLower.includes('academic') || evaluationAnalysis.showAcademicPlanBtn) &&
+    !isDualRisk &&
+    !isFinancialRisk &&
+    !isCounselingRisk;
 
   return (
     <tr className="hover:bg-slate-800/30 transition-colors">
@@ -286,12 +316,14 @@ function StudentRosterRow({
       <td className="py-4 px-5">
         <button
           type="button"
-          onClick={() => onOpenDetailModal && onOpenDetailModal(student)}
-          className="text-left group cursor-pointer"
+          onClick={() => canViewDetails && onOpenDetailModal && onOpenDetailModal(student)}
+          disabled={!canViewDetails}
+          className={`text-left group ${canViewDetails ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+          title={canViewDetails ? 'View Full Profile & Student Detail Panel' : 'Disabled: Both Marks and Student Survey must be submitted'}
         >
-          <div className="font-bold text-slate-100 group-hover:text-indigo-300 transition flex items-center gap-1.5">
+          <div className={`font-bold transition flex items-center gap-1.5 ${canViewDetails ? 'text-slate-100 group-hover:text-indigo-300' : 'text-slate-400'}`}>
             <span>{student.name}</span>
-            <Eye size={12} className="opacity-0 group-hover:opacity-100 text-indigo-400 transition" />
+            {canViewDetails && <Eye size={12} className="opacity-0 group-hover:opacity-100 text-indigo-400 transition" />}
           </div>
           <div className="text-xs text-slate-400">{student.email}</div>
         </button>
@@ -361,7 +393,7 @@ function StudentRosterRow({
           </div>
         ) : (
           <span className="inline-block px-3 py-1 text-xs rounded-full font-medium bg-slate-800/80 text-slate-400 border border-slate-700">
-            Unevaluated
+            Unevaluated / Awaiting Data
           </span>
         )}
       </td>
@@ -402,8 +434,14 @@ function StudentRosterRow({
 
             <button
               type="button"
-              onClick={() => onOpenDetailModal && onOpenDetailModal(student)}
-              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 transition cursor-pointer bg-slate-800/70 hover:bg-slate-800 px-2 py-1 rounded border border-slate-700/60"
+              onClick={() => canViewDetails && onOpenDetailModal && onOpenDetailModal(student)}
+              disabled={!canViewDetails}
+              className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded border ${
+                canViewDetails
+                  ? 'text-indigo-400 hover:text-indigo-300 transition cursor-pointer bg-slate-800/70 hover:bg-slate-800 border-slate-700/60'
+                  : 'text-slate-600 border-slate-800 bg-slate-900/40 cursor-not-allowed'
+              }`}
+              title={canViewDetails ? 'Details & Audit Log' : 'Disabled: Both Marks and Student Survey must be submitted'}
             >
               <Eye size={12} />
               <span>Details & Audit Log</span>
@@ -412,33 +450,21 @@ function StudentRosterRow({
         ) : isRiskEvaluated ? (
           /* TEACHER VIEW: RECOMMENDED INTERVENTIONS */
           <div className="flex flex-col gap-2 min-w-[170px] max-w-[220px]">
-            {/* Case A: Lack of Interest / Mental Health / Disengagement (Strict Isolation) */}
-            {isCaseA ? (
+            {/* 1. DUAL RISK: BOTH College Fund & Assign Counselor */}
+            {isDualRisk ? (
               <div className="space-y-1.5">
-                {assignedCounselor ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
-                    <UserCheck size={12} className="text-purple-400 shrink-0" />
-                    <span className="truncate">Counselor Assigned</span>
+                {/* College Fund Request / Status */}
+                {student.financial_relief_status === 'DOCUMENTS_REQUIRED' ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/50 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
+                    <Clock size={12} className="text-amber-400 shrink-0" />
+                    <span className="truncate">Docs Required</span>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
-                    className="h-8 w-full px-3 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Case A: Supportive Counseling Protocol (Academic Penalty Suppressed)"
-                  >
-                    <UserCheck size={13} className="text-purple-300 shrink-0" />
-                    <span>Assign Counselor</span>
-                  </button>
-                )}
-                <div className="text-[10px] text-purple-300/80 font-medium">
-                  Supportive Counseling Priority
-                </div>
-              </div>
-            ) : isCaseB ? (
-              /* Case B: Student has Interest, but cannot study due to Financial Issues */
-              <div className="space-y-1.5">
-                {isPendingInstitutionalSupport ? (
+                ) : student.financial_relief_status === 'APPROVED' || student.financial_relief_status === 'DISBURSED' ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Fund Approved</span>
+                  </div>
+                ) : isPendingInstitutionalSupport ? (
                   <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
                     <DollarSign size={12} className="text-emerald-400 shrink-0" />
                     <span className="truncate">Pending Support</span>
@@ -454,30 +480,79 @@ function StudentRosterRow({
                   </button>
                 )}
 
-                {/* Assign Counselor button next to / alongside Request College Fund */}
+                {/* Counselor Assignment */}
                 {assignedCounselor ? (
-                  <div className="inline-flex items-center gap-1.5 text-[11px] text-purple-300 bg-purple-950/30 px-2 py-1 rounded border border-purple-800/30 w-full">
-                    <UserCheck size={11} className="text-purple-400 shrink-0" />
+                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
+                    <UserCheck size={12} className="text-purple-400 shrink-0" />
                     <span className="truncate">Counselor Assigned</span>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => onAssignCounselor && onAssignCounselor(student)}
-                    className="h-7 w-full px-2 bg-purple-950/40 text-purple-300 border border-purple-700/40 hover:bg-purple-900/50 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
-                    title="Assign Counselor to support student"
+                    className="h-8 w-full px-2.5 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
                   >
-                    <UserCheck size={12} className="text-purple-400 shrink-0" />
+                    <UserCheck size={13} className="text-purple-300 shrink-0" />
                     <span>Assign Counselor</span>
                   </button>
                 )}
-
-                <div className="text-[10px] text-emerald-300/80 font-medium">
-                  Financial Relief Track
+                <div className="text-[10px] text-rose-300/90 font-medium">Dual Risk: Financial + Wellness</div>
+              </div>
+            ) : isFinancialRisk ? (
+              /* 2. FINANCIAL HARDSHIP ONLY */
+              <div className="space-y-1.5">
+                {student.financial_relief_status === 'DOCUMENTS_REQUIRED' ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/50 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
+                    <Clock size={12} className="text-amber-400 shrink-0" />
+                    <span className="truncate">Docs Required</span>
+                  </div>
+                ) : student.financial_relief_status === 'APPROVED' || student.financial_relief_status === 'DISBURSED' ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Fund Approved</span>
+                  </div>
+                ) : isPendingInstitutionalSupport ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <DollarSign size={12} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Pending Support</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onGrantFinancialAid && onGrantFinancialAid(student)}
+                    className="h-8 w-full px-2.5 bg-emerald-900/40 text-emerald-200 border border-emerald-500/50 hover:bg-emerald-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <DollarSign size={13} className="text-emerald-300 shrink-0" />
+                    <span>Request College Fund</span>
+                  </button>
+                )}
+                <div className="text-[10px] text-emerald-300/80 font-medium">Financial Relief Track</div>
+              </div>
+            ) : isCounselingRisk ? (
+              /* 3. WELLNESS / DISENGAGEMENT ONLY */
+              <div className="space-y-1.5">
+                {assignedCounselor ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
+                    <UserCheck size={12} className="text-purple-400 shrink-0" />
+                    <span className="truncate">Counselor Assigned</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
+                    className="h-8 w-full px-3 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Supportive Counseling Protocol (Academic Penalty Suppressed)"
+                  >
+                    <UserCheck size={13} className="text-purple-300 shrink-0" />
+                    <span>Assign Counselor</span>
+                  </button>
+                )}
+                <div className="text-[10px] text-purple-300/80 font-medium">
+                  Supportive Counseling Priority
                 </div>
               </div>
             ) : (
-              /* Case C: Purely Academic Concerns */
+              /* 4. PURE ACADEMIC CONCERNS ONLY (Strictly Academic Plan, Hide Non-Academic) */
               <div className="space-y-1">
                 {assignedPlan ? (
                   <div className="bg-emerald-950/50 border border-emerald-500/40 p-2 rounded-lg flex flex-col gap-1">
@@ -486,7 +561,7 @@ function StudentRosterRow({
                       <span className="line-clamp-1">Assigned: {planTitle}</span>
                     </div>
                   </div>
-                ) : evaluationAnalysis.showAcademicPlanBtn ? (
+                ) : isPureAcademic || evaluationAnalysis.showAcademicPlanBtn ? (
                   <button
                     type="button"
                     onClick={handleAcademicPlanClick}
@@ -498,6 +573,7 @@ function StudentRosterRow({
                 ) : (
                   <span className="text-xs text-slate-400 italic">Standard Monitoring</span>
                 )}
+                <div className="text-[10px] text-amber-300/80 font-medium">Pure Academic Track</div>
               </div>
             )}
           </div>
@@ -513,14 +589,20 @@ function StudentRosterRow({
             {/* DETAIL PANEL BUTTON */}
             <button
               type="button"
-              onClick={() => onOpenDetailModal && onOpenDetailModal(student)}
-              className="h-8 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
-              title="View Full Profile & Student Detail Panel"
+              onClick={() => canViewDetails && onOpenDetailModal && onOpenDetailModal(student)}
+              disabled={!canViewDetails}
+              className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
+                canViewDetails
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer shadow-sm active:scale-95'
+                  : 'bg-slate-900/50 text-slate-600 border border-slate-800 cursor-not-allowed opacity-50'
+              }`}
+              title={canViewDetails ? 'View Full Profile & Student Detail Panel' : 'Disabled: Both Marks and Student Survey must be submitted'}
             >
-              <Eye size={13} className="text-indigo-400 shrink-0" />
+              <Eye size={13} className={canViewDetails ? 'text-indigo-400 shrink-0' : 'text-slate-600 shrink-0'} />
               <span>Details</span>
             </button>
 
+            {/* MARKS EDIT BUTTON */}
             <button
               type="button"
               onClick={() => onOpenRecordModal && onOpenRecordModal(student)}
@@ -530,6 +612,19 @@ function StudentRosterRow({
               <Edit3 size={13} className="text-[#818cf8] shrink-0" />
               <span>Marks</span>
             </button>
+
+            {/* RE-SURVEY BUTTON (TEACHER OVERRIDE 14-DAY COOLDOWN) */}
+            {onRequestSurveyResubmission && (
+              <button
+                type="button"
+                onClick={() => onRequestSurveyResubmission(studentDbId, student.name)}
+                className="h-8 px-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/40 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
+                title="Request Student Survey Re-submission (Reset 14-day Cooldown)"
+              >
+                <RotateCcw size={13} className="text-amber-400 shrink-0" />
+                <span className="hidden xl:inline">Re-survey</span>
+              </button>
+            )}
 
             {/* AI EVALUATE BUTTON */}
             <button
@@ -551,6 +646,7 @@ function StudentRosterRow({
               <span>{isEvaluatingThisStudent ? 'Evaluating...' : isRiskEvaluated ? 'Re-evaluate' : 'AI Evaluate'}</span>
             </button>
 
+            {/* DELETE BUTTON */}
             <button
               type="button"
               onClick={() => onDeleteStudent && onDeleteStudent(studentDbId, student.name)}
@@ -578,6 +674,7 @@ export default function StudentRosterTable({
   onAssignPlan,
   onGrantFinancialAid,
   onOpenDetailModal,
+  onRequestSurveyResubmission,
   showActions = true,
 }) {
   const totalColumns = showActions ? 7 : 6;
@@ -628,6 +725,7 @@ export default function StudentRosterTable({
                   onAssignPlan={onAssignPlan}
                   onGrantFinancialAid={onGrantFinancialAid}
                   onOpenDetailModal={onOpenDetailModal}
+                  onRequestSurveyResubmission={onRequestSurveyResubmission}
                 />
               ))
             )}

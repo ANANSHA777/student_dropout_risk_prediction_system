@@ -11,6 +11,7 @@ import {
   assignAcademicPlan,
   assignCounselorToStudent,
   requestCollegeFund,
+  requestSurveyResubmission,
 } from '../services/teacherService';
 import TeacherStats from '../components/TeacherStats';
 import StudentRosterTable from '../components/StudentRosterTable';
@@ -269,6 +270,17 @@ const TeacherDashboard = () => {
     }
   };
 
+  // Request Student Survey Re-submission (Reset 14-day Cooldown)
+  const handleRequestSurveyResubmission = async (studentId, studentName) => {
+    try {
+      await requestSurveyResubmission(studentId, { reason: 'Teacher requested updated self-assessment' });
+      await loadData();
+      showFeedback(`Survey re-submission requested for ${studentName || 'student'}. 14-day cooldown reset.`);
+    } catch (err) {
+      setError(`Failed to request survey re-submission: ${err.message}`);
+    }
+  };
+
   // Open Counselor Assignment Modal
   const handleOpenCounselorModal = (student) => {
     setSelectedStudentForCounselor(student);
@@ -424,6 +436,7 @@ const TeacherDashboard = () => {
             onAssignCounselor={handleOpenCounselorModal}
             onOpenDetailModal={handleOpenDetailModal}
             onGrantFinancialAid={handleOpenFinancialAidModal}
+            onRequestSurveyResubmission={handleRequestSurveyResubmission}
           />
         </div>
       </main>

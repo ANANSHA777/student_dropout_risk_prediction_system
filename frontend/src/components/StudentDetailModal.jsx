@@ -1,5 +1,5 @@
 // frontend/src/components/StudentDetailModal.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   GraduationCap,
@@ -23,8 +23,12 @@ import {
   Briefcase,
   Moon,
   Info,
+  XCircle,
+  Download,
 } from 'lucide-react';
 import { requestCollegeFund } from '../services/teacherService';
+import { updateFinancialReliefStatus } from '../services/adminService';
+import { useAuth } from '../context/AuthContext';
 
 export function StudentDetailsModal({
   student,
@@ -34,13 +38,35 @@ export function StudentDetailsModal({
   onOpenAcademicPlanModal,
   onEvaluateRisk,
   onUpdateSuccess,
+  role,
 }) {
+  const { user } = useAuth();
+  const effectiveRole = (role || user?.role || 'Teacher').toLowerCase();
+  const isCounselor = effectiveRole === 'counselor';
+  const isTeacher = effectiveRole === 'teacher';
+  const isAdmin = effectiveRole === 'admin';
+
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'survey' | 'audit' | 'actions'
   const [fundAmount, setFundAmount] = useState('5000');
   const [fundReason, setFundReason] = useState('Tuition & Academic Relief Support');
   const [fundNotes, setFundNotes] = useState('');
   const [isSubmittingFund, setIsSubmittingFund] = useState(false);
   const [fundFeedback, setFundFeedback] = useState(null);
+
+  // Admin Approval Hub states
+  const [adminReliefNotes, setAdminReliefNotes] = useState('');
+  const [isAdminUpdatingRelief, setIsAdminUpdatingRelief] = useState(false);
+  const [localReliefStatus, setLocalReliefStatus] = useState(
+    student?.financial_relief_status || student?.financialAidStatus || 'NONE'
+  );
+  const [localLogs, setLocalLogs] = useState(student?.intervention_logs || []);
+
+  useEffect(() => {
+    if (student) {
+      setLocalReliefStatus(student.financial_relief_status || student.financialAidStatus || 'NONE');
+      setLocalLogs(student.intervention_logs || []);
+    }
+  }, [student]);
 
   if (!isOpen || !student) return null;
 
@@ -50,12 +76,33 @@ export function StudentDetailsModal({
   const cgpa = student.cgpa !== null && student.cgpa !== undefined ? student.cgpa : 'N/A';
   const attendance = student.attendancePercentage ?? student.attendance ?? 'N/A';
   const backlogs = student.activeBacklogs || survey.activeBacklogs || '0 Backlogs';
-  const mentalHealth = student.mentalHealthSelfReport || student.mentalHealthState || survey.mentalHealthState || 'Good / Balanced';
+  const rawMentalHealth = student.mentalHealthSelfReport || student.mentalHealthState || survey.mentalHealthState || 'Good / Balanced';
+  const hasMentalHealthFlag = ['depressed', 'overwhelmed', 'poor', 'anxious', 'sad', 'struggling', 'bad', 'low', 'severe', 'critical'].some(
+    term => String(rawMentalHealth).toLowerCase().includes(term)
+  ) || student.needsCounseling === true;
+
+  const displayMentalHealth = isCounselor
+    ? rawMentalHealth
+    : isAdmin
+    ? (hasMentalHealthFlag ? 'Non-Academic Risk: Wellness Flagged (Counselor Access Only)' : 'Wellness: No Flags Recorded')
+    : hasMentalHealthFlag
+    ? 'Non-Academic Risk: Wellness Flagged'
+    : 'Wellness: Stable / No Flags';
+
   const financialStress = student.financialStress || student.moneyFeeWorries || survey.moneyFeeWorries || 'Moderate (Manageable)';
   const academicInterest = student.academicInterest || survey.academicInterest || 'High (Interested & Motivated)';
   const abilityToStudy = student.abilityToStudy || survey.abilityToStudy || 'Full (Good Environment & Focus)';
-  const disengagementReason = student.disengagementReason || survey.disengagementReason || 'None';
+  
+  const rawDisengagement = student.disengagementReason || survey.disengagementReason || 'None';
+  const hasDisengagementFlag = rawDisengagement && !['none', 'n/a', 'no'].includes(rawDisengagement.toLowerCase().trim());
+  const displayDisengagement = isCounselor
+    ? rawDisengagement
+    : hasDisengagementFlag
+    ? 'Academic Disengagement Flagged'
+    : 'None';
+
   const sleepHours = student.sleepHoursPerNight || survey.nightlySleepHours || '5 - 6 hours';
+  const displaySleepHours = isCounselor ? sleepHours : '[Confidential / Masked]';
   const familyIncome = student.familyIncome || survey.familyMonthlyIncome || 'Standard';
   const livingSituation = student.livingSituation || survey.livingSituation || 'Campus Hostel';
   const commuteTime = student.commuteTime || survey.dailyCommuteTime || 'Less than 30 mins';
@@ -74,12 +121,14 @@ export function StudentDetailsModal({
   const isCaseC = evaluationCase === 'CASE_C_PURE_ACADEMIC';
 
   const isPendingInstitutionalSupport =
+    localReliefStatus === 'Pending Institutional Support' ||
+    localReliefStatus === 'REQUESTED' ||
     student.financialAidStatus === 'Pending Institutional Support' ||
     student.financial_relief_status === 'REQUESTED' ||
     student.collegeFinancialAid?.status === 'Pending Institutional Support';
 
-  const interventionLogs = Array.isArray(student.intervention_logs) && student.intervention_logs.length > 0
-    ? student.intervention_logs
+  const interventionLogs = Array.isArray(localLogs) && localLogs.length > 0
+    ? localLogs
     : [];
 
   const qualitativeNotes = Array.isArray(student.qualitativeNotes) ? student.qualitativeNotes : [];
@@ -95,12 +144,51 @@ export function StudentDetailsModal({
         notes: fundNotes,
       });
 
-      setFundFeedback('Emergency College Fund request submitted. Status marked as "Pending Institutional Support".');
+      setLocalReliefStatus('REQUESTED');
+      const newEntry = {
+        action: 'Requested Emergency College Fund',
+        performed_by: user?.name || 'Faculty / Teacher',
+        timestamp: new Date().toISOString(),
+        notes: fundNotes || `Applied for ₹${Number(fundAmount) || 5000} institutional grant: ${fundReason}`,
+      };
+      setLocalLogs((prev) => [newEntry, ...prev]);
+      setFundFeedback('Emergency College Fund request submitted. Status marked as "REQUESTED".');
       if (onUpdateSuccess) onUpdateSuccess();
     } catch (err) {
       setFundFeedback(`Error: ${err.message}`);
     } finally {
       setIsSubmittingFund(false);
+    }
+  };
+
+  const handleAdminReliefAction = async (newStatus) => {
+    setIsAdminUpdatingRelief(true);
+    setFundFeedback(null);
+    try {
+      const res = await updateFinancialReliefStatus(studentId, newStatus, adminReliefNotes);
+      setLocalReliefStatus(newStatus);
+      const actionLabel =
+        newStatus === 'APPROVED'
+          ? 'College Fund Approved by Admin'
+          : newStatus === 'DISBURSED'
+          ? 'College Fund Disbursed'
+          : newStatus === 'REJECTED'
+          ? 'College Fund Rejected by Admin'
+          : 'Financial Relief: Documents Required';
+      const newEntry = {
+        action: actionLabel,
+        performed_by: user?.name || 'Administrator',
+        timestamp: new Date().toISOString(),
+        notes: adminReliefNotes || (res?.profile?.intervention_logs?.slice(-1)[0]?.notes) || `Financial relief status updated to ${newStatus}`,
+      };
+      setLocalLogs((prev) => [newEntry, ...prev]);
+      setFundFeedback(`Financial relief status successfully updated to "${newStatus}".`);
+      setAdminReliefNotes('');
+      if (onUpdateSuccess) onUpdateSuccess();
+    } catch (err) {
+      setFundFeedback(`Error updating status: ${err.message}`);
+    } finally {
+      setIsAdminUpdatingRelief(false);
     }
   };
 
@@ -329,19 +417,21 @@ export function StudentDetailsModal({
                     )}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => onOpenAcademicPlanModal && onOpenAcademicPlanModal(student)}
-                    disabled={isCaseA}
-                    className={`w-full py-2 px-3 text-xs font-semibold rounded-lg border transition flex items-center justify-center gap-2 ${
-                      isCaseA
-                        ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
-                        : 'bg-amber-950/40 text-amber-300 border-amber-700/50 hover:bg-amber-900/50 cursor-pointer'
-                    }`}
-                  >
-                    <BookOpen size={14} />
-                    {isCaseA ? 'Academic Plan Suppressed (Counseling Priority)' : 'Configure Academic Remedial Plan'}
-                  </button>
+                  {!isAdmin && !isCounselor && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAcademicPlanModal && onOpenAcademicPlanModal(student)}
+                      disabled={isCaseA}
+                      className={`w-full py-2 px-3 text-xs font-semibold rounded-lg border transition flex items-center justify-center gap-2 ${
+                        isCaseA
+                          ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
+                          : 'bg-amber-950/40 text-amber-300 border-amber-700/50 hover:bg-amber-900/50 cursor-pointer'
+                      }`}
+                    >
+                      <BookOpen size={14} />
+                      {isCaseA ? 'Academic Plan Suppressed (Counseling Priority)' : 'Configure Academic Remedial Plan'}
+                    </button>
+                  )}
                 </div>
 
                 {/* 2. NON-ACADEMIC RISK EVALUATION LOGS */}
@@ -366,9 +456,9 @@ export function StudentDetailsModal({
                           1. Wellness & Mental Health
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
-                          Status: <span className="text-rose-300 font-medium">{mentalHealth}</span> • Sleep: {sleepHours}
+                          Status: <span className="text-rose-300 font-medium">{displayMentalHealth}</span> • Sleep: {displaySleepHours}
                         </div>
-                        {nonAcademicRisk?.wellness?.details && (
+                        {nonAcademicRisk?.wellness?.details && isCounselor && (
                           <div className="text-[10px] text-slate-500 mt-1 italic">
                             {nonAcademicRisk.wellness.details}
                           </div>
@@ -388,11 +478,11 @@ export function StudentDetailsModal({
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
                           Interest: <span className="text-indigo-300 font-medium">{academicInterest}</span>
-                          {disengagementReason !== 'None' && (
-                            <span> • Root: <span className="text-amber-300">{disengagementReason}</span></span>
+                          {hasDisengagementFlag && (
+                            <span> • Root: <span className="text-amber-300">{displayDisengagement}</span></span>
                           )}
                         </div>
-                        {nonAcademicRisk?.disengagement?.details && (
+                        {nonAcademicRisk?.disengagement?.details && isCounselor && (
                           <div className="text-[10px] text-slate-500 mt-1 italic">
                             {nonAcademicRisk.disengagement.details}
                           </div>
@@ -425,17 +515,19 @@ export function StudentDetailsModal({
                     </div>
                   </div>
 
-                  {/* Counselor Assignment Trigger */}
-                  <button
-                    type="button"
-                    onClick={() => onOpenCounselorModal && onOpenCounselorModal(student)}
-                    className="w-full py-2 px-3 bg-purple-950/40 text-purple-300 border border-purple-700/50 hover:bg-purple-900/50 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                  >
-                    <UserCheck size={14} />
-                    {student.assignedCounselor || student.assigned_counselor_id
-                      ? 'Reassign / Log Additional Counseling'
-                      : 'Assign Registered Counselor (/api/counselors)'}
-                  </button>
+                  {/* Counselor Assignment Trigger (Hidden for Admin) */}
+                  {!isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCounselorModal && onOpenCounselorModal(student)}
+                      className="w-full py-2 px-3 bg-purple-950/40 text-purple-300 border border-purple-700/50 hover:bg-purple-900/50 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                    >
+                      <UserCheck size={14} />
+                      {student.assignedCounselor || student.assigned_counselor_id
+                        ? 'Reassign / Log Additional Counseling'
+                        : 'Assign Registered Counselor (/api/counselors)'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -461,6 +553,13 @@ export function StudentDetailsModal({
                 Exact responses submitted by the student during the comprehensive lifestyle, mental wellness, and academic self-assessment survey.
               </p>
 
+              {!isCounselor && (
+                <div className="p-3 bg-slate-950/80 border border-indigo-950 rounded-lg text-[11px] text-indigo-300 flex items-center gap-2">
+                  <Info size={14} className="shrink-0 text-indigo-400" />
+                  <span>Privacy Protection Active: Confidential mental health disclosures and clinical metrics are masked for non-counselor roles.</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
                 <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-1">
                   <span className="text-slate-400 block text-[11px] font-medium">Academic Study Motivation & Interest</span>
@@ -474,12 +573,12 @@ export function StudentDetailsModal({
 
                 <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-1">
                   <span className="text-slate-400 block text-[11px] font-medium">Disengagement Root Cause</span>
-                  <p className="text-sm font-semibold text-amber-300">{disengagementReason}</p>
+                  <p className="text-sm font-semibold text-amber-300">{displayDisengagement}</p>
                 </div>
 
                 <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-1">
                   <span className="text-slate-400 block text-[11px] font-medium">Self-Reported Mental Health & Emotional Wellbeing</span>
-                  <p className="text-sm font-semibold text-rose-300">{mentalHealth}</p>
+                  <p className="text-sm font-semibold text-rose-300">{displayMentalHealth}</p>
                 </div>
 
                 <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-1">
@@ -494,7 +593,7 @@ export function StudentDetailsModal({
 
                 <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-1">
                   <span className="text-slate-400 block text-[11px] font-medium">Average Nightly Sleep</span>
-                  <p className="text-sm font-semibold text-white">{sleepHours}</p>
+                  <p className="text-sm font-semibold text-white">{displaySleepHours}</p>
                 </div>
 
                 <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-1">
@@ -548,35 +647,45 @@ export function StudentDetailsModal({
                 </div>
               ) : (
                 <div className="relative border-l-2 border-indigo-900/60 ml-4 space-y-6 pt-2">
-                  {interventionLogs.map((log, idx) => (
-                    <div key={idx} className="relative pl-6">
-                      {/* Timeline marker */}
-                      <span className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                      </span>
+                  {interventionLogs.map((log, idx) => {
+                    const isPrivateCounselorLog = isAdmin && (
+                      (log.performed_by || '').toLowerCase().includes('counselor') ||
+                      (log.action || '').toLowerCase().includes('counseling')
+                    );
+                    const displayLogNotes = isPrivateCounselorLog
+                      ? '[Confidential Counselor Clinical Note — Masked for Privacy]'
+                      : log.notes || 'Action logged in student intervention audit.';
 
-                      <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800/90 shadow-sm space-y-1">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <CheckCircle2 size={13} className="text-indigo-400" />
-                            {log.action}
-                          </h5>
-                          <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-                            <Clock size={11} />
-                            {formatDate(log.timestamp)}
-                          </span>
-                        </div>
+                    return (
+                      <div key={idx} className="relative pl-6">
+                        {/* Timeline marker */}
+                        <span className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                        </span>
 
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          {log.notes || 'Action logged in student intervention audit.'}
-                        </p>
+                        <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800/90 shadow-sm space-y-1">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <CheckCircle2 size={13} className="text-indigo-400" />
+                              {log.action}
+                            </h5>
+                            <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                              <Clock size={11} />
+                              {formatDate(log.timestamp)}
+                            </span>
+                          </div>
 
-                        <div className="text-[10px] text-slate-500 pt-1">
-                          Performed By: <span className="text-indigo-300 font-medium">{log.performed_by || 'Staff'}</span>
+                          <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                            {displayLogNotes}
+                          </p>
+
+                          <div className="text-[10px] text-slate-500 pt-1">
+                            Performed By: <span className="text-indigo-300 font-medium">{log.performed_by || 'Staff'}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -585,15 +694,22 @@ export function StudentDetailsModal({
                 <div className="pt-4 border-t border-slate-800 space-y-2">
                   <h4 className="text-xs font-bold text-slate-300">Staff Notes & Case Observations</h4>
                   <div className="space-y-2">
-                    {qualitativeNotes.map((note, idx) => (
-                      <div key={idx} className="bg-slate-950/40 p-2.5 rounded border border-slate-800/60 text-xs">
-                        <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                          <span className="font-semibold text-slate-300">{note.authorRole || 'Teacher'}:</span>
-                          <span className="font-mono">{formatDate(note.createdAt)}</span>
+                    {qualitativeNotes.map((note, idx) => {
+                      const isCounselorNote = (note.authorRole || '').toLowerCase() === 'counselor';
+                      const noteContent = isAdmin && isCounselorNote
+                        ? '[Confidential Counselor Clinical Note — Masked for Privacy]'
+                        : note.note;
+
+                      return (
+                        <div key={idx} className="bg-slate-950/40 p-2.5 rounded border border-slate-800/60 text-xs">
+                          <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                            <span className="font-semibold text-slate-300">{note.authorRole || 'Teacher'}:</span>
+                            <span className="font-mono">{formatDate(note.createdAt)}</span>
+                          </div>
+                          <p className="text-slate-300">{noteContent}</p>
                         </div>
-                        <p className="text-slate-300">{note.note}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -601,110 +717,465 @@ export function StudentDetailsModal({
           )}
 
           {/* TAB 4: ACTIVE RELIEF & COLLEGE FUND ACTIONS */}
-          {activeTab === 'actions' && (
-            <div className="bg-linear-to-r from-emerald-950/30 via-slate-900 to-slate-900 border border-emerald-800/40 rounded-xl p-6 space-y-5">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5 text-emerald-400">
-                  <DollarSign size={20} />
-                  <div>
-                    <h3 className="text-sm font-bold text-white">College Emergency Relief Fund Portal</h3>
-                    <p className="text-[11px] text-slate-400">
-                      Emergency tuition and living expense grant request action
-                    </p>
+          {activeTab === 'actions' && (() => {
+            const normalizedStatus = (localReliefStatus || 'NONE').toUpperCase();
+            const isRequestedStatus =
+              normalizedStatus === 'REQUESTED' ||
+              normalizedStatus === 'PENDING INSTITUTIONAL SUPPORT' ||
+              normalizedStatus === 'PENDING' ||
+              normalizedStatus === 'PENDING REVIEW';
+
+            const fundLog = (localLogs || [])
+              .slice()
+              .reverse()
+              .find((l) => {
+                const act = (l.action || '').toLowerCase();
+                return act.includes('fund') || act.includes('aid') || act.includes('relief');
+              });
+
+            const rawRequestedAmount =
+              student.collegeFinancialAid?.grantAmount ||
+              student.collegeFinancialAid?.amount ||
+              student.requestedFundAmount ||
+              5000;
+            const requestedAmountFormatted = Number(rawRequestedAmount).toLocaleString();
+
+            const requestedCategory =
+              student.collegeFinancialAid?.reason ||
+              student.collegeFinancialAid?.category ||
+              student.requestedFundReason ||
+              'Tuition & Academic Relief Support';
+
+            const requestedNotes =
+              student.collegeFinancialAid?.notes ||
+              fundLog?.notes ||
+              'Faculty initiated institutional emergency fund application to prevent student dropout.';
+
+            const requestedBy = fundLog?.performed_by || 'Department Faculty / Teacher';
+            const requestedDate = student.collegeFinancialAid?.appliedAt || fundLog?.timestamp || student.updatedAt;
+            const financialDocs = Array.isArray(student.financial_documents) ? student.financial_documents : [];
+
+            return (
+              <div className="bg-linear-to-r from-emerald-950/30 via-slate-900 to-slate-900 border border-emerald-800/40 rounded-xl p-6 space-y-5">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800 flex-wrap gap-3">
+                  <div className="flex items-center gap-2.5 text-emerald-400">
+                    <DollarSign size={20} />
+                    <div>
+                      <h3 className="text-sm font-bold text-white">
+                        {isAdmin ? 'Institutional Financial Relief Approval Hub' : 'College Emergency Relief Fund Portal'}
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        {isAdmin
+                          ? 'Administrative evaluation, document verification & funding disbursement'
+                          : 'Emergency tuition and living expense grant request action'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">Relief Status:</span>
+                    <span
+                      className={`text-xs px-3 py-1 rounded-full font-bold border ${
+                        isRequestedStatus
+                          ? 'bg-amber-950/80 text-amber-300 border-amber-500/40 animate-pulse'
+                          : normalizedStatus === 'DOCUMENTS_REQUIRED'
+                          ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                          : normalizedStatus === 'APPROVED' || normalizedStatus === 'DISBURSED'
+                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                          : normalizedStatus === 'REJECTED'
+                          ? 'bg-red-950/80 text-red-300 border-red-500/40'
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}
+                    >
+                      {normalizedStatus}
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Relief Status:</span>
-                  <span
-                    className={`text-xs px-3 py-1 rounded-full font-bold border ${
-                      isPendingInstitutionalSupport
-                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 animate-pulse'
-                        : 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}
-                  >
-                    {student.financial_relief_status || student.financialAidStatus || 'NONE'}
-                  </span>
-                </div>
-              </div>
+                {fundFeedback && (
+                  <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-lg text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 size={15} className="shrink-0" />
+                    <span>{fundFeedback}</span>
+                  </div>
+                )}
 
-              {fundFeedback && (
-                <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-lg text-emerald-300 text-xs flex items-center gap-2">
-                  <CheckCircle2 size={15} className="shrink-0" />
-                  <span>{fundFeedback}</span>
-                </div>
-              )}
+                {isAdmin ? (
+                  /* ADMIN APPROVAL HUB */
+                  <div className="space-y-5">
+                    {isRequestedStatus ? (
+                      /* CASE 1: REQUESTED -> SHOW DETAILS & ADMIN ACTION BUTTONS */
+                      <div className="space-y-4">
+                        {/* Request Details Card */}
+                        <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                            <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <FileText size={14} className="text-amber-400" />
+                              Pending Faculty Relief Request Details
+                            </h4>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              Submitted: {formatDate(requestedDate)}
+                            </span>
+                          </div>
 
-              <form onSubmit={handleCollegeFundSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Requested Fund Amount (₹ / $)</label>
-                  <input
-                    type="number"
-                    required
-                    value={fundAmount}
-                    onChange={(e) => setFundAmount(e.target.value)}
-                    placeholder="e.g. 5000"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                              <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
+                              <span className="text-base font-bold text-emerald-400">
+                                ₹{requestedAmountFormatted}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Emergency College Aid</span>
+                            </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Support Category</label>
-                  <input
-                    type="text"
-                    required
-                    value={fundReason}
-                    onChange={(e) => setFundReason(e.target.value)}
-                    placeholder="e.g. Tuition fee grant / Book allowance"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                              <span className="text-slate-500 block text-[11px]">Support Category</span>
+                              <span className="text-sm font-semibold text-white truncate block">
+                                {requestedCategory}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Institutional Quota</span>
+                            </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Administrative Notes</label>
-                  <input
-                    type="text"
-                    value={fundNotes}
-                    onChange={(e) => setFundNotes(e.target.value)}
-                    placeholder="e.g. Student has high interest, fee barrier verified"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                              <span className="text-slate-500 block text-[11px]">Requested By Faculty</span>
+                              <span className="text-sm font-semibold text-slate-200 truncate block">
+                                {requestedBy}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Department Advocate</span>
+                            </div>
+                          </div>
 
-                <div className="md:col-span-3 flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingFund}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer active:scale-95"
-                  >
-                    {isSubmittingFund ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Submitting Relief Request...
-                      </>
+                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+                            <span className="text-slate-500 block text-[11px] font-semibold mb-1">
+                              Faculty Case Justification & Notes:
+                            </span>
+                            <p className="text-slate-300 leading-relaxed italic">
+                              "{requestedNotes}"
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Uploaded Verification Documents (if any) */}
+                        {financialDocs.length > 0 && (
+                          <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-2">
+                            <h5 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                              <FileText size={13} className="text-indigo-400" />
+                              Uploaded Proof & Verification Documents ({financialDocs.length})
+                            </h5>
+                            <div className="flex flex-wrap gap-2">
+                              {financialDocs.map((doc, dIdx) => (
+                                <a
+                                  key={dIdx}
+                                  href={doc.fileData || doc.url || '#'}
+                                  download={doc.filename || `document_${dIdx + 1}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-slate-900/80 px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-indigo-500/50 transition"
+                                >
+                                  <FileText size={12} />
+                                  <span className="max-w-[180px] truncate">{doc.filename || 'Proof Document'}</span>
+                                  <Download size={11} className="text-slate-500 ml-1" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Admin Decision Remarks Note Field */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                            Administrative Decision Remarks (Optional note appended to student audit trail)
+                          </label>
+                          <input
+                            type="text"
+                            value={adminReliefNotes}
+                            onChange={(e) => setAdminReliefNotes(e.target.value)}
+                            placeholder="e.g., Verified fee receipt and income status. Disbursed from student relief fund."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
+                          />
+                        </div>
+
+                        {/* 3 Explicit Admin Action Buttons */}
+                        <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
+                          {/* 1. Reject Request */}
+                          <button
+                            type="button"
+                            disabled={isAdminUpdatingRelief}
+                            onClick={() => handleAdminReliefAction('REJECTED')}
+                            className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            <XCircle size={14} />
+                            Reject Request
+                          </button>
+
+                          {/* 2. Request Verification Documents */}
+                          <button
+                            type="button"
+                            disabled={isAdminUpdatingRelief}
+                            onClick={() => handleAdminReliefAction('DOCUMENTS_REQUIRED')}
+                            className="px-4 py-2 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            <FileText size={14} />
+                            Request Verification Documents
+                          </button>
+
+                          {/* 3. Approve & Disburse Funds */}
+                          <button
+                            type="button"
+                            disabled={isAdminUpdatingRelief}
+                            onClick={() => handleAdminReliefAction('DISBURSED')}
+                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            {isAdminUpdatingRelief ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <CheckCircle2 size={14} />
+                            )}
+                            Approve & Disburse Funds
+                          </button>
+                        </div>
+                      </div>
+                    ) : normalizedStatus === 'DOCUMENTS_REQUIRED' ? (
+                      /* CASE 2: DOCUMENTS REQUIRED */
+                      <div className="space-y-4">
+                        <div className="p-4 bg-amber-950/30 border border-amber-800/50 rounded-xl space-y-2">
+                          <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                            <AlertTriangle size={15} />
+                            <span>Awaiting Verification Documents from Student</span>
+                          </div>
+                          <p className="text-xs text-amber-200/80">
+                            The student has been prompted on their portal to submit financial proof documents (income certificate, fee statements). You can approve disbursement immediately if satisfied or reject the claim.
+                          </p>
+                        </div>
+
+                        {/* Request Details Card */}
+                        <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                              <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
+                              <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                            </div>
+                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                              <span className="text-slate-500 block text-[11px]">Support Category</span>
+                              <span className="text-sm font-semibold text-white">{requestedCategory}</span>
+                            </div>
+                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                              <span className="text-slate-500 block text-[11px]">Faculty Advocate</span>
+                              <span className="text-sm font-semibold text-slate-200">{requestedBy}</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+                            <span className="text-slate-500 block text-[11px] font-semibold mb-1">Faculty Notes:</span>
+                            <p className="text-slate-300 italic">"{requestedNotes}"</p>
+                          </div>
+                        </div>
+
+                        {/* Uploaded Documents */}
+                        <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-2">
+                          <h5 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                            <FileText size={13} className="text-indigo-400" />
+                            Student Uploaded Proof Documents ({financialDocs.length})
+                          </h5>
+                          {financialDocs.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic py-2">
+                              Student has not uploaded proof files yet.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {financialDocs.map((doc, dIdx) => (
+                                <a
+                                  key={dIdx}
+                                  href={doc.fileData || doc.url || '#'}
+                                  download={doc.filename || `document_${dIdx + 1}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-slate-900/80 px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-indigo-500/50 transition"
+                                >
+                                  <FileText size={12} />
+                                  <span className="max-w-[180px] truncate">{doc.filename || 'Proof Document'}</span>
+                                  <Download size={11} className="text-slate-500 ml-1" />
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Decision Remarks */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                            Administrative Decision Remarks (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={adminReliefNotes}
+                            onChange={(e) => setAdminReliefNotes(e.target.value)}
+                            placeholder="Remarks for approval or rejection..."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
+                          <button
+                            type="button"
+                            disabled={isAdminUpdatingRelief}
+                            onClick={() => handleAdminReliefAction('REJECTED')}
+                            className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            <XCircle size={14} />
+                            Reject Request
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isAdminUpdatingRelief}
+                            onClick={() => handleAdminReliefAction('DISBURSED')}
+                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 disabled:opacity-50"
+                          >
+                            {isAdminUpdatingRelief ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <CheckCircle2 size={14} />
+                            )}
+                            Approve & Disburse Funds
+                          </button>
+                        </div>
+                      </div>
+                    ) : normalizedStatus === 'APPROVED' || normalizedStatus === 'DISBURSED' ? (
+                      /* CASE 3: APPROVED / DISBURSED */
+                      <div className="bg-slate-950/80 rounded-xl border border-emerald-800/40 p-5 space-y-4">
+                        <div className="flex items-center gap-3 text-emerald-400">
+                          <CheckCircle2 size={24} />
+                          <div>
+                            <h4 className="text-sm font-bold text-white">Emergency Relief Grant Approved & Disbursed</h4>
+                            <p className="text-xs text-emerald-300/80">
+                              Institutional funds have been allocated to the student's account to ensure study continuation.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-2">
+                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                            <span className="text-slate-500 block text-[11px]">Disbursed Amount</span>
+                            <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                          </div>
+                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                            <span className="text-slate-500 block text-[11px]">Category</span>
+                            <span className="text-sm font-semibold text-white">{requestedCategory}</span>
+                          </div>
+                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                            <span className="text-slate-500 block text-[11px]">Relief Record</span>
+                            <span className="text-sm font-semibold text-slate-200">Institutional Grant Active</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : normalizedStatus === 'REJECTED' ? (
+                      /* CASE 4: REJECTED */
+                      <div className="bg-slate-950/80 rounded-xl border border-red-800/40 p-5 space-y-4">
+                        <div className="flex items-center gap-3 text-red-400">
+                          <XCircle size={24} />
+                          <div>
+                            <h4 className="text-sm font-bold text-white">Emergency Relief Request Rejected</h4>
+                            <p className="text-xs text-red-300/80">
+                              This application was reviewed and declined by administrative leadership.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
-                      <>
-                        <Send size={14} />
-                        Submit College Fund Request & Append Audit Log
-                      </>
+                      /* CASE 5: NONE */
+                      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-8 text-center space-y-2">
+                        <DollarSign size={28} className="mx-auto text-slate-500" />
+                        <h4 className="text-sm font-semibold text-slate-300">No Emergency Relief Request Active</h4>
+                        <p className="text-xs text-slate-500 max-w-md mx-auto">
+                          Department faculty have not submitted an institutional relief fund request for this student. When faculty submit a request, administrative review options will be displayed here.
+                        </p>
+                      </div>
                     )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
+                  </div>
+                ) : isCounselor ? (
+                  /* COUNSELOR READ-ONLY VIEW */
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-6 text-center space-y-2">
+                    <DollarSign size={24} className="mx-auto text-slate-400" />
+                    <h4 className="text-xs font-bold text-slate-300">Financial Relief Status: {normalizedStatus}</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      College relief fund requests are initiated by teaching faculty and approved by administrative leadership. Counselors have read-only visibility for student holistic context.
+                    </p>
+                  </div>
+                ) : (
+                  /* TEACHER SUBMISSION FORM */
+                  <form onSubmit={handleCollegeFundSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Requested Fund Amount (₹ / $)</label>
+                      <input
+                        type="number"
+                        required
+                        value={fundAmount}
+                        onChange={(e) => setFundAmount(e.target.value)}
+                        placeholder="e.g. 5000"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Support Category</label>
+                      <input
+                        type="text"
+                        required
+                        value={fundReason}
+                        onChange={(e) => setFundReason(e.target.value)}
+                        placeholder="e.g. Tuition fee grant / Book allowance"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Administrative Notes</label>
+                      <input
+                        type="text"
+                        value={fundNotes}
+                        onChange={(e) => setFundNotes(e.target.value)}
+                        placeholder="e.g. Student has high interest, fee barrier verified"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3 flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingFund}
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer active:scale-95"
+                      >
+                        {isSubmittingFund ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            Submitting Relief Request...
+                          </>
+                        ) : (
+                          <>
+                            <Send size={14} />
+                            Submit College Fund Request & Append Audit Log
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 bg-[#080c14] flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => onEvaluateRisk && onEvaluateRisk(studentId)}
-            className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer active:scale-95"
-          >
-            <Sparkles size={14} />
-            Re-evaluate Non-Academic AI Risk
-          </button>
+        <div className={`p-4 border-t border-slate-800 bg-[#080c14] flex items-center ${isAdmin ? 'justify-end' : 'justify-between'}`}>
+          {!isAdmin && (
+            <button
+              type="button"
+              onClick={() => onEvaluateRisk && onEvaluateRisk(studentId)}
+              className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer active:scale-95"
+            >
+              <Sparkles size={14} />
+              Re-evaluate Non-Academic AI Risk
+            </button>
+          )}
 
           <button
             type="button"

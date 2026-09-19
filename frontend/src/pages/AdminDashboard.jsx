@@ -13,6 +13,12 @@ import {
   BarChart3,
   Filter,
   KeyRound,
+  DollarSign,
+  Download,
+  Loader2,
+  FileText,
+  Check,
+  Eye,
 } from 'lucide-react';
 import {
   fetchStaffMembers,
@@ -20,6 +26,8 @@ import {
   deleteStaffMember,
   fetchOverallRiskAnalytics,
   fetchAdminStudents,
+  updateFinancialReliefStatus,
+  downloadInstitutionReport,
 } from '../services/adminService';
 import { changePassword } from '../services/authService';
 import AdminStats from '../components/AdminStats';
@@ -36,7 +44,7 @@ const YEARS = ['All', '1st Year', '2nd Year', '3rd Year', '4th Year'];
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
 
-  // Primary View Toggle: 'staff' | 'analytics'
+  // Primary View Toggle: 'staff' | 'analytics' | 'financial'
   const [viewMode, setViewMode] = useState('staff');
 
   // Staff State
@@ -62,6 +70,10 @@ export default function AdminDashboard() {
   const [selectedStudentForDetail, setSelectedStudentForDetail] = useState(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
+  // Financial Relief & Reports State
+  const [updatingReliefId, setUpdatingReliefId] = useState(null);
+  const [exportingReport, setExportingReport] = useState(false);
+
   // Load Staff Directory
   const loadStaff = async () => {
     setStaffLoading(true);
@@ -86,6 +98,13 @@ export default function AdminDashboard() {
       ]);
       setAnalytics(analyticsRes.analytics || {});
       setStudents(studentsRes.students || []);
+      setSelectedStudentForDetail((prev) => {
+        if (!prev) return null;
+        const fresh = (studentsRes.students || []).find(
+          (s) => (s._id || s.id || s.studentId) === (prev._id || prev.id || prev.studentId)
+        );
+        return fresh || prev;
+      });
     } catch (err) {
       console.error('Error loading student analytics:', err);
     } finally {
@@ -95,10 +114,11 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadStaff();
+    loadStudentAnalytics();
   }, []);
 
   useEffect(() => {
-    if (viewMode === 'analytics') {
+    if (viewMode === 'analytics' || viewMode === 'financial') {
       loadStudentAnalytics();
     }
   }, [viewMode, selectedDept, selectedYear]);
@@ -148,6 +168,53 @@ export default function AdminDashboard() {
 
     return copy;
   }, [analytics, students]);
+
+  const financialRequests = useMemo(() => {
+    return students.filter((s) => {
+      const status = (s.financial_relief_status || '').toUpperCase();
+      return (
+        ['REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED'].includes(status) ||
+        s.financialAidStatus === 'Pending Institutional Support' ||
+        s.collegeFinancialAid?.status === 'Pending Institutional Support'
+      );
+    });
+  }, [students]);
+
+  const pendingReliefCount = useMemo(() => {
+    return financialRequests.filter((s) => {
+      const status = (s.financial_relief_status || '').toUpperCase();
+      return (
+        status === 'REQUESTED' ||
+        status === 'DOCUMENTS_REQUIRED' ||
+        s.financialAidStatus === 'Pending Institutional Support'
+      );
+    }).length;
+  }, [financialRequests]);
+
+  const handleUpdateReliefStatus = async (studentId, status, studentName) => {
+    setUpdatingReliefId(studentId);
+    try {
+      await updateFinancialReliefStatus(studentId, status, `Admin updated financial relief status to ${status}`);
+      await loadStudentAnalytics();
+      showFeedback(`Financial relief status for ${studentName || 'student'} updated to "${status}".`);
+    } catch (err) {
+      showFeedback(`Error updating status: ${err.message}`);
+    } finally {
+      setUpdatingReliefId(null);
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    setExportingReport(true);
+    try {
+      await downloadInstitutionReport('csv');
+      showFeedback('Institution Risk Report downloaded successfully (CSV).');
+    } catch (err) {
+      showFeedback(`Failed to download report: ${err.message}`);
+    } finally {
+      setExportingReport(false);
+    }
+  };
 
   const showFeedback = (msg) => {
     setActionFeedback(msg);
@@ -228,6 +295,21 @@ export default function AdminDashboard() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Download Institution Reports Button */}
+          <button
+            onClick={handleDownloadReport}
+            disabled={exportingReport}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg border border-slate-700 text-sm font-semibold transition flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+            title="Download full institutional student dropout risk CSV report"
+          >
+            {exportingReport ? (
+              <Loader2 size={16} className="animate-spin text-emerald-400" />
+            ) : (
+              <Download size={16} className="text-emerald-400" />
+            )}
+            <span>{exportingReport ? 'Generating...' : 'Download Reports'}</span>
+          </button>
+
           {viewMode === 'staff' && (
             <button
               onClick={() => setIsModalOpen(true)}
@@ -259,7 +341,7 @@ export default function AdminDashboard() {
       </header>
 
       {/* Main Mode Toggle Tabs */}
-      <div className="max-w-7xl mx-auto mb-6 flex items-center gap-3 border-b border-slate-800 pb-4">
+      <div className="max-w-7xl mx-auto mb-6 flex items-center gap-3 border-b border-slate-800 pb-4 flex-wrap">
         <button
           onClick={() => setViewMode('staff')}
           className={`px-5 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-2 cursor-pointer ${
@@ -280,6 +362,22 @@ export default function AdminDashboard() {
           }`}
         >
           <BarChart3 size={18} /> Student Risk & Department Analytics
+        </button>
+
+        <button
+          onClick={() => setViewMode('financial')}
+          className={`px-5 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-2 cursor-pointer ${
+            viewMode === 'financial'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/25'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <DollarSign size={18} /> Pending Financial Relief Requests
+          {pendingReliefCount > 0 && (
+            <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-400 text-slate-950">
+              {pendingReliefCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -469,6 +567,178 @@ export default function AdminDashboard() {
                 onOpenDetailModal={handleOpenDetailModal}
               />
             </section>
+          </div>
+        )}
+
+        {/* MODE 3: PENDING FINANCIAL RELIEF REQUESTS */}
+        {viewMode === 'financial' && (
+          <div className="space-y-6">
+            {/* Financial Relief Header Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                <div className="text-xs text-slate-400 font-semibold uppercase">Total Aid Applications</div>
+                <div className="text-2xl font-bold text-white mt-1">{financialRequests.length}</div>
+              </div>
+              <div className="bg-slate-900 border border-amber-500/30 p-5 rounded-xl">
+                <div className="text-xs text-amber-400 font-semibold uppercase">Pending Requests</div>
+                <div className="text-2xl font-bold text-amber-300 mt-1">
+                  {financialRequests.filter(s => (s.financial_relief_status || '').toUpperCase() === 'REQUESTED' || s.financialAidStatus === 'Pending Institutional Support').length}
+                </div>
+              </div>
+              <div className="bg-slate-900 border border-purple-500/30 p-5 rounded-xl">
+                <div className="text-xs text-purple-400 font-semibold uppercase">Documents Required</div>
+                <div className="text-2xl font-bold text-purple-300 mt-1">
+                  {financialRequests.filter(s => (s.financial_relief_status || '').toUpperCase() === 'DOCUMENTS_REQUIRED').length}
+                </div>
+              </div>
+              <div className="bg-slate-900 border border-emerald-500/30 p-5 rounded-xl">
+                <div className="text-xs text-emerald-400 font-semibold uppercase">Approved / Disbursed</div>
+                <div className="text-2xl font-bold text-emerald-300 mt-1">
+                  {financialRequests.filter(s => ['APPROVED', 'DISBURSED'].includes((s.financial_relief_status || '').toUpperCase())).length}
+                </div>
+              </div>
+            </div>
+
+            {/* Financial Requests Table */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 flex-wrap gap-2">
+                <div className="flex items-center gap-2 text-emerald-400">
+                  <DollarSign size={20} />
+                  <h2 className="text-lg font-bold text-white">Pending Financial Relief Requests & Verification</h2>
+                </div>
+                <span className="text-xs text-slate-400">
+                  Showing <strong className="text-white">{financialRequests.length}</strong> relief cases
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
+                      <th className="p-3">Student</th>
+                      <th className="p-3">Dept / Year</th>
+                      <th className="p-3">Relief Status</th>
+                      <th className="p-3">Proof Documents</th>
+                      <th className="p-3 text-right">Administrative Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 text-sm">
+                    {financialRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="p-8 text-center text-slate-500 italic text-xs">
+                          No active or pending financial relief requests found. When teachers request college funds for students, they will appear here.
+                        </td>
+                      </tr>
+                    ) : (
+                      financialRequests.map((student) => {
+                        const sId = student._id || student.id;
+                        const rawStatus = (student.financial_relief_status || (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')).toUpperCase();
+                        const isUpdating = updatingReliefId === sId;
+                        const docs = student.financial_documents || [];
+
+                        return (
+                          <tr key={sId} className="hover:bg-slate-800/40 transition">
+                            <td className="p-3">
+                              <div className="font-bold text-white">{student.name}</div>
+                              <div className="text-xs text-slate-400">{student.studentId || student.rollNo || 'STU'} • {student.email}</div>
+                            </td>
+                            <td className="p-3">
+                              <div className="text-xs text-slate-300">{student.department || 'General'}</div>
+                              <div className="text-xs text-indigo-400">{student.yearOfStudy || student.year || '1st Year'}</div>
+                            </td>
+                            <td className="p-3">
+                              <span className={`inline-block px-3 py-1 text-xs rounded-full font-bold border ${
+                                rawStatus === 'REQUESTED'
+                                  ? 'bg-amber-950/60 text-amber-300 border-amber-500/40 animate-pulse'
+                                  : rawStatus === 'DOCUMENTS_REQUIRED'
+                                  ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
+                                  : rawStatus === 'APPROVED' || rawStatus === 'DISBURSED'
+                                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                                  : 'bg-red-950/60 text-red-300 border-red-500/40'
+                              }`}>
+                                {rawStatus}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              {docs.length === 0 ? (
+                                <span className="text-xs text-slate-500 italic">No files uploaded</span>
+                              ) : (
+                                <div className="space-y-1">
+                                  {docs.map((doc, dIdx) => (
+                                    <a
+                                      key={dIdx}
+                                      href={doc.fileData || doc.url || '#'}
+                                      download={doc.filename || `document_${dIdx + 1}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 underline font-medium bg-slate-950/50 px-2 py-1 rounded border border-slate-800 hover:border-indigo-500/50"
+                                      title={`Uploaded ${doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : ''}`}
+                                    >
+                                      <FileText size={12} className="shrink-0" />
+                                      <span className="max-w-[150px] truncate">{doc.filename || 'Proof Document'}</span>
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {/* Request Documents */}
+                                {rawStatus !== 'DOCUMENTS_REQUIRED' && rawStatus !== 'DISBURSED' && (
+                                  <button
+                                    type="button"
+                                    disabled={isUpdating}
+                                    onClick={() => handleUpdateReliefStatus(sId, 'DOCUMENTS_REQUIRED', student.name)}
+                                    className="px-2.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border border-amber-700/50 rounded-lg text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50"
+                                  >
+                                    Request Documents
+                                  </button>
+                                )}
+
+                                {/* Approve & Disburse */}
+                                {rawStatus !== 'DISBURSED' && (
+                                  <button
+                                    type="button"
+                                    disabled={isUpdating}
+                                    onClick={() => handleUpdateReliefStatus(sId, 'DISBURSED', student.name)}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
+                                  >
+                                    <Check size={13} />
+                                    Approve & Disburse Funds
+                                  </button>
+                                )}
+
+                                {/* Reject Request */}
+                                {rawStatus !== 'REJECTED' && (
+                                  <button
+                                    type="button"
+                                    disabled={isUpdating}
+                                    onClick={() => handleUpdateReliefStatus(sId, 'REJECTED', student.name)}
+                                    className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-700/50 rounded-lg text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50"
+                                  >
+                                    Reject Request
+                                  </button>
+                                )}
+
+                                {/* Details & Audit Log */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenDetailModal(student)}
+                                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer active:scale-95"
+                                >
+                                  <Eye size={13} />
+                                  Details
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </main>

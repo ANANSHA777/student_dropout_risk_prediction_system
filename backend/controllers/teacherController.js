@@ -112,8 +112,11 @@ exports.getTeacherStudents = async (req, res) => {
       const resolvedAttendance = profile.attendancePercentage ?? profile.attendance ?? user.attendance ?? null;
       const isSurveyDone = Boolean(profile.surveyCompleted || user.surveyCompleted);
 
+      const marks_submitted = resolvedCgpa !== null && resolvedAttendance !== null;
+      const survey_submitted = isSurveyDone;
+
       // Evaluation button is enabled ONLY when CGPA, Attendance, AND Survey are present
-      const canEvaluate = resolvedCgpa !== null && resolvedAttendance !== null && isSurveyDone === true;
+      const canEvaluate = marks_submitted && survey_submitted;
 
       return {
         _id: user._id,
@@ -125,8 +128,13 @@ exports.getTeacherStudents = async (req, res) => {
         cgpa: resolvedCgpa,
         attendance: resolvedAttendance,
         attendancePercentage: resolvedAttendance,
+        marks_submitted,
+        survey_submitted,
         surveyCompleted: isSurveyDone,
         canEvaluate, // Used by frontend to toggle AI Evaluation Button
+        survey_cooldown_override: Boolean(profile.survey_cooldown_override),
+        last_survey_submission_date: profile.last_survey_submission_date || profile.lastSurveySubmittedAt || null,
+        financial_documents: profile.financial_documents || [],
         riskLevel: profile.riskLevel || user.riskLevel || null,
         riskCategory: profile.riskCategory || 'None',
         primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
@@ -328,6 +336,9 @@ exports.getRegisteredCounselors = async (req, res) => {
         activeCasesCount: activeCount,
       };
     });
+
+    // Sort ascending by active_case_count for load balancing
+    enrichedCounselors.sort((a, b) => a.active_case_count - b.active_case_count);
 
     return res.status(200).json({
       success: true,
@@ -676,5 +687,46 @@ exports.deleteStudent = async (req, res) => {
       success: false,
       message: error.message || 'Server error deleting student',
     });
+  }
+};
+
+// @desc    Authorize student survey re-submission, bypassing the 14-day cooldown
+// @route   POST /api/teacher/request-survey-resubmission
+// @access  Private (Teacher, Admin)
+exports.requestSurveyResubmission = async (req, res) => {
+  try {
+    const { studentId } = req.body;
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'studentId is required' });
+    }
+
+    const filter = mongoose.Types.ObjectId.isValid(studentId)
+      ? { $or: [{ user: studentId }, { _id: studentId }] }
+      : { studentId };
+
+    const profile = await StudentProfile.findOne(filter);
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    profile.survey_cooldown_override = true;
+    profile.intervention_logs.push({
+      action: 'Survey Re-submission Authorized',
+      performed_by: req.user?.name || 'Teacher',
+      timestamp: new Date(),
+      notes: 'Teacher authorized immediate self-assessment survey re-submission, bypassing the 14-day cooldown.',
+    });
+
+    await profile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Survey re-submission authorized. Cooldown bypassed for student.',
+      studentId,
+      survey_cooldown_override: true,
+    });
+  } catch (error) {
+    console.error('Error in requestSurveyResubmission:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

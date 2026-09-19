@@ -1,6 +1,5 @@
-// src/components/StudentSurveyForm.jsx
 import React, { useState, useEffect } from 'react';
-import { Brain, CheckCircle2, Send, AlertCircle, Edit3, ChevronUp } from 'lucide-react';
+import { Brain, CheckCircle2, Send, AlertCircle, Edit3, ChevronUp, Clock } from 'lucide-react';
 
 export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted, studentId }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -142,12 +141,30 @@ export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted,
             Survey Status: {isCompleted ? 'Completed' : 'Pending'}
           </span>
 
+          {/* Cooldown pill */}
+          {isCompleted && initialData?.cooldownActive && (
+            <span className="text-[11px] text-amber-400 font-medium px-2.5 py-1 rounded-full bg-amber-950/50 border border-amber-500/30 flex items-center gap-1.5">
+              <Clock size={12} />
+              Cooldown: {initialData.daysRemaining || 14}d left
+            </span>
+          )}
+
           {/* Single Primary Action Button */}
           {isCompleted && !isEditing && (
             <button
               type="button"
-              onClick={() => setIsEditing(true)}
-              className="bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+              onClick={() => !initialData?.cooldownActive && setIsEditing(true)}
+              disabled={Boolean(initialData?.cooldownActive)}
+              title={
+                initialData?.cooldownActive
+                  ? `Survey cooldown active: ${initialData.daysRemaining || 14} days remaining before you can update self-assessment.`
+                  : 'Update Self-Assessment'
+              }
+              className={`border text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                initialData?.cooldownActive
+                  ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed opacity-60'
+                  : 'bg-indigo-600/20 hover:bg-indigo-600/30 border-indigo-500/40 text-indigo-300 cursor-pointer'
+              }`}
             >
               <Edit3 size={14} />
               Update Self-Assessment
@@ -155,6 +172,26 @@ export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted,
           )}
         </div>
       </div>
+
+      {/* Override Notice if teacher requested re-survey */}
+      {initialData?.survey_cooldown_override && (
+        <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
+          <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+          <span>Faculty teacher has requested an updated self-assessment. Cooldown override active.</span>
+        </div>
+      )}
+
+      {/* Cooldown Active Information Banner */}
+      {initialData?.cooldownActive && !isEditing && (
+        <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-lg text-xs text-amber-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Clock size={15} className="shrink-0 text-amber-400" />
+            <span>
+              14-day re-assessment cooldown active ({initialData.daysRemaining || 14} days remaining). Your answers are locked until the cycle finishes or faculty requests a re-submission.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Feedback Toast */}
       {message && (

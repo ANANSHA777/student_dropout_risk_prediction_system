@@ -50,6 +50,13 @@ const studentProfileSchema = new mongoose.Schema(
     lastSurveySubmittedAt: {
       type: Date,
     },
+    last_survey_submission_date: {
+      type: Date,
+    },
+    survey_cooldown_override: {
+      type: Boolean,
+      default: false,
+    },
 
     // --- FLAT SURVEY FIELDS ---
     academicInterest: { 
@@ -215,9 +222,35 @@ const studentProfileSchema = new mongoose.Schema(
     // --- FINANCIAL RELIEF STATUS (STRICT SPEC) ---
     financial_relief_status: {
       type: String,
-      enum: ['NONE', 'REQUESTED', 'APPROVED', 'DISBURSED'],
+      enum: ['NONE', 'REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED'],
       default: 'NONE',
     },
+
+    // --- FINANCIAL PROOF DOCUMENTS ---
+    financial_documents: [
+      {
+        document_id: {
+          type: String,
+          default: () => new mongoose.Types.ObjectId().toString(),
+        },
+        url: {
+          type: String,
+          default: '',
+        },
+        filename: {
+          type: String,
+          required: true,
+        },
+        fileData: {
+          type: String,
+          default: '',
+        },
+        uploaded_at: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
     // --- EVALUATION SOURCE ---
     evaluation_source: {

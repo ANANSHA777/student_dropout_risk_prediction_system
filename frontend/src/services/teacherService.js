@@ -250,3 +250,13 @@ export const requestCollegeFund = async (studentId, fundData = {}) => {
 
   throw new Error('Failed to request college fund');
 };
+
+// 10. Authorize Survey Re-submission (Bypass Cooldown)
+export const requestSurveyResubmission = async (studentId) => {
+  const res = await fetch(`${API_BASE}/request-survey-resubmission`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ studentId }),
+  });
+  return handleResponse(res, 'Failed to authorize survey re-submission');
+};

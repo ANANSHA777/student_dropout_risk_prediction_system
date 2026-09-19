@@ -67,3 +67,35 @@ export const fetchAdminStudents = async (department = 'All', yearOfStudy = 'All'
   if (!res.ok) throw new Error(data.message || 'Failed to fetch filtered student roster');
   return data;
 };
+
+// 6. Update Student Financial Relief Status (Admin)
+export const updateFinancialReliefStatus = async (studentId, status, notes = '') => {
+  const res = await fetch(`${API_BASE_URL}/financial-relief/update-status`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ studentId, status, notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to update financial relief status');
+  return data;
+};
+
+// 7. Download Institutional Summary Report (CSV / PDF)
+export const downloadInstitutionReport = async (format = 'csv') => {
+  const res = await fetch(`/api/reports/export?format=${format}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || 'Failed to export institution report');
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `institution_risk_report_${new Date().toISOString().slice(0, 10)}.${format === 'json' ? 'json' : 'csv'}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
