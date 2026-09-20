@@ -19,7 +19,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { changePassword } from '../services/authService';
-import { uploadFinancialDocument } from '../services/studentService';
+import { uploadFinancialDocument, confirmCounselingSession } from '../services/studentService';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import StudentSurveyForm from '../components/StudentSurveyForm';
 
@@ -35,6 +35,10 @@ export default function StudentDashboard() {
   // Document Upload State
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [docFeedback, setDocFeedback] = useState(null);
+
+  // Counseling Session Confirmation State
+  const [confirmingSession, setConfirmingSession] = useState(false);
+  const [sessionFeedback, setSessionFeedback] = useState(null);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -69,6 +73,27 @@ export default function StudentDashboard() {
       setIsPasswordModalOpen(false);
     } catch (err) {
       alert(err.message || 'Failed to update password');
+    }
+  };
+
+  const handleConfirmSession = async () => {
+    setConfirmingSession(true);
+    try {
+      await confirmCounselingSession();
+      setProfile((prev) => ({
+        ...prev,
+        counseling_session: {
+          ...(prev?.counseling_session || {}),
+          status: 'CONFIRMED_BY_STUDENT',
+        },
+      }));
+      setSessionFeedback('Counseling session attendance successfully confirmed!');
+      setTimeout(() => setSessionFeedback(null), 4000);
+      await fetchProfile();
+    } catch (err) {
+      alert(err.message || 'Failed to confirm counseling session attendance');
+    } finally {
+      setConfirmingSession(false);
     }
   };
 
@@ -162,7 +187,16 @@ export default function StudentDashboard() {
     ? 'Low Risk'
     : rawRisk;
 
-  const hasCounselor = Boolean(profile.assignedCounselorName || profile.counselorName);
+  const hasCounselor = Boolean(
+    profile.assignedCounselorName ||
+    profile.counselorName ||
+    profile.assigned_counselor_id ||
+    profile.counseling_session
+  );
+  const hasAcademicPlan = Boolean(
+    profile.academic_remedial_plan &&
+    (profile.academic_remedial_plan.status === 'IN_PROGRESS' || profile.academic_remedial_plan.status === 'COMPLETED')
+  );
   const hasFinancialRelief = (profile.financial_relief_status && profile.financial_relief_status !== 'NONE') ||
     (profile.financialAidStatus === 'Pending Institutional Support');
   const hasInterventions = Array.isArray(profile.intervention_logs) && profile.intervention_logs.length > 0;
@@ -204,6 +238,63 @@ export default function StudentDashboard() {
           <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold rounded-lg flex items-center gap-2 animate-in fade-in">
             <CheckCircle2 size={16} className="text-indigo-400" />
             {passwordFeedback}
+          </div>
+        )}
+
+        {/* Counseling Session Scheduled Notification Banner */}
+        {profile.counseling_session?.status === 'SCHEDULED' && (
+          <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-slate-900 border-2 border-purple-500/60 rounded-xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in fade-in">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 shrink-0 mt-0.5">
+                <HeartHandshake size={22} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-bold text-white">Counseling Session Scheduled</h3>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-purple-900/60 text-purple-300 border border-purple-500/40 animate-pulse">
+                    Action Required: Confirm Attendance
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1">
+                  Counselor <strong>{profile.counseling_session.counselor_name || profile.assignedCounselorName || 'Assigned Counselor'}</strong> has scheduled a session for{' '}
+                  <strong className="text-white">
+                    {profile.counseling_session.date ? new Date(profile.counseling_session.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Upcoming Date'}
+                  </strong>{' '}
+                  at <strong className="text-white">{profile.counseling_session.time || 'TBD'}</strong>.
+                </p>
+                {profile.counseling_session.notes && (
+                  <p className="text-xs text-purple-200/80 italic mt-0.5">
+                    Instructions: "{profile.counseling_session.notes}"
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={handleConfirmSession}
+              disabled={confirmingSession}
+              className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-purple-600/30 shrink-0 cursor-pointer active:scale-95 disabled:opacity-50"
+            >
+              {confirmingSession ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Confirming...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={14} />
+                  <span>Confirm Attendance</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Session Confirmation Toast */}
+        {sessionFeedback && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold rounded-lg flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 size={16} className="text-emerald-400" />
+            {sessionFeedback}
           </div>
         )}
 
@@ -264,7 +355,7 @@ export default function StudentDashboard() {
         </div>
 
         {/* Active Support Status & Institutional Care */}
-        {(hasCounselor || hasFinancialRelief || hasInterventions) && (
+        {(hasCounselor || hasFinancialRelief || hasInterventions || hasAcademicPlan) && (
           <div className="bg-slate-900 border border-indigo-500/20 rounded-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
@@ -281,22 +372,116 @@ export default function StudentDashboard() {
               {hasCounselor && (
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-start gap-3">
                   <UserCheck className="text-indigo-400 mt-0.5 shrink-0" size={22} />
-                  <div>
+                  <div className="flex-1">
                     <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                       Assigned Counselor
                     </div>
                     <div className="text-base font-bold text-white mt-0.5">
-                      {profile.assignedCounselorName || profile.counselorName}
+                      {profile.counseling_session?.counselor_name || profile.assignedCounselorName || profile.counselorName || 'Counselor'}
                     </div>
                     <div className="text-xs text-indigo-300 font-medium mt-1">
                       Case Status: <span className="text-slate-200">{profile.counselingStatus || 'Active Review'}</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">
+
+                    {/* Live Counseling Session Status */}
+                    {profile.counseling_session?.status && (
+                      <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-400 font-semibold">Session Status:</span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold border ${
+                            profile.counseling_session.status === 'COMPLETED'
+                              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                              : profile.counseling_session.status === 'CONFIRMED_BY_STUDENT'
+                              ? 'bg-indigo-950/60 text-indigo-300 border-indigo-500/40'
+                              : profile.counseling_session.status === 'SCHEDULED'
+                              ? 'bg-purple-950/60 text-purple-300 border-purple-500/40 animate-pulse'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}>
+                            {profile.counseling_session.status === 'CONFIRMED_BY_STUDENT'
+                              ? 'Attendance Confirmed by You'
+                              : profile.counseling_session.status === 'COMPLETED'
+                              ? 'Session Completed'
+                              : profile.counseling_session.status}
+                          </span>
+                        </div>
+                        {profile.counseling_session.date && (
+                          <div className="text-[11px] text-slate-300">
+                            Scheduled for {new Date(profile.counseling_session.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {profile.counseling_session.time}
+                          </div>
+                        )}
+                        {profile.counseling_session.status === 'COMPLETED' && profile.counseling_session.completion_notes && (
+                          <div className="text-[11px] text-emerald-300/90 italic">
+                            Notes: "{profile.counseling_session.completion_notes}"
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-400 mt-1.5">
                       Your assigned counselor is available for confidential guidance and wellness support.
                     </p>
                   </div>
                 </div>
               )}
+
+              {/* Active Academic Remedial Plan Card */}
+              {hasAcademicPlan && (
+                <div className="bg-slate-950 p-4 rounded-lg border border-amber-500/40 flex items-start gap-3">
+                  <GraduationCap className="text-amber-400 mt-0.5 shrink-0" size={22} />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Academic Remedial Plan
+                      </div>
+                      <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold border ${
+                        profile.academic_remedial_plan.status === 'COMPLETED'
+                          ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                          : 'bg-amber-950/60 text-amber-300 border-amber-500/40 animate-pulse'
+                      }`}>
+                        {profile.academic_remedial_plan.status === 'COMPLETED' ? 'Completed' : 'In Progress'}
+                      </span>
+                    </div>
+
+                    <div className="text-base font-bold text-white">
+                      {profile.academic_remedial_plan.plan_title || 'Academic Support Plan'}
+                    </div>
+
+                    <div className="text-xs text-slate-400">
+                      Assigned by: <span className="text-slate-200 font-medium">{profile.academic_remedial_plan.assigned_by_teacher_name || 'Faculty Mentor'}</span>
+                      {profile.academic_remedial_plan.assigned_at && (
+                        <span> • {new Date(profile.academic_remedial_plan.assigned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      )}
+                    </div>
+
+                    {profile.academic_remedial_plan.plan_details && (
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {profile.academic_remedial_plan.plan_details}
+                      </p>
+                    )}
+
+                    {profile.academic_remedial_plan.target_metrics && (
+                      <div className="bg-slate-900/80 p-2.5 rounded border border-slate-800 text-xs text-amber-300">
+                        <span className="text-slate-400 font-semibold">Target Metrics: </span>
+                        {profile.academic_remedial_plan.target_metrics}
+                      </div>
+                    )}
+
+                    {profile.academic_remedial_plan.status === 'COMPLETED' && (
+                      <div className="bg-emerald-950/40 p-2.5 rounded border border-emerald-800/40 text-xs space-y-0.5">
+                        <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                          <CheckCircle2 size={12} /> Plan Completed
+                        </span>
+                        {profile.academic_remedial_plan.completion_notes && (
+                          <p className="text-emerald-200/90 italic text-[11px]">
+                            "{profile.academic_remedial_plan.completion_notes}"
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
 
               {/* Financial Aid Card */}
               {hasFinancialRelief && (

@@ -27,7 +27,24 @@ const uploadFinancialDocument =
   studentController.uploadFinancialDocument ||
   ((req, res) => res.status(501).json({ message: 'uploadFinancialDocument controller missing' }));
 
+const getDashboardSummary =
+  studentController.getDashboardSummary ||
+  studentController.getStudentProfile ||
+  ((req, res) => res.status(501).json({ message: 'getDashboardSummary controller missing' }));
+
+const confirmCounselingSession =
+  studentController.confirmCounselingSession ||
+  ((req, res) => res.status(501).json({ message: 'confirmCounselingSession controller missing' }));
+
 // --- STUDENT PROFILE & SURVEY ROUTES ---
+
+// GET /api/student/dashboard-summary - Complete student dashboard summary with active plans & sessions
+router.get(
+  '/dashboard-summary',
+  protect,
+  authorize('Student', 'Admin'),
+  getDashboardSummary
+);
 
 // GET /api/student/profile - Get profile, CGPA, attendance & evaluation status
 router.get(
@@ -35,6 +52,14 @@ router.get(
   protect,
   authorize('Student', 'Admin'),
   getStudentProfile
+);
+
+// POST /api/student/confirm-session - Student confirms attendance for scheduled session
+router.post(
+  '/confirm-session',
+  protect,
+  authorize('Student', 'Admin'),
+  confirmCounselingSession
 );
 
 // GET /api/student/survey - Get existing survey responses if already completed

@@ -93,6 +93,18 @@ exports.getCounselorCases = async (req, res) => {
           surveyCompleted: Boolean(profile.surveyCompleted || user.surveyCompleted),
           surveyData: profile.surveyData || {},
           sessionContext: session?.studentBackgroundContext || null,
+          counseling_session: profile.counseling_session || {
+            status: 'PENDING_SCHEDULE',
+            date: null,
+            time: '',
+            notes: '',
+          },
+          academic_remedial_plan: profile.academic_remedial_plan || {
+            status: profile.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED',
+            plan_title: profile.assignedAcademicPlan || '',
+            target_metrics: 'Target CGPA: ≥ 6.0, Attendance: ≥ 75%',
+          },
+          financial_relief_status: profile.financial_relief_status || 'NONE',
         };
       })
       .filter((student) => {
@@ -331,5 +343,168 @@ exports.updateCaseStatus = async (req, res) => {
       message: 'Server error updating case status',
       error: error.message,
     });
+  }
+};
+
+// @desc    Schedule a counseling session with a student
+// @route   POST /api/counselor/schedule-session
+// @access  Private (Counselor, Admin)
+exports.scheduleSession = async (req, res) => {
+  try {
+    const { studentId, date, time, notes } = req.body;
+    if (!studentId || !date || !time) {
+      return res.status(400).json({ success: false, message: 'Student ID, date, and time are required' });
+    }
+
+    const counselorId = req.user?._id || req.user?.id;
+    const counselorName = req.user?.name || 'Counselor';
+
+    const isObjectId = mongoose.Types.ObjectId.isValid(studentId);
+    const filter = isObjectId ? { $or: [{ user: studentId }, { _id: studentId }] } : { studentId };
+
+    const profile = await StudentProfile.findOne(filter);
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const sessionData = {
+      date: new Date(date),
+      time,
+      notes: notes || '',
+      counselor_name: counselorName,
+      status: 'SCHEDULED',
+      completion_notes: '',
+      completed_at: null,
+    };
+
+    profile.counseling_session = sessionData;
+    profile.counselingStatus = 'In Progress';
+    if (!profile.assigned_counselor_id) profile.assigned_counselor_id = counselorId;
+    if (!profile.assignedCounselor) profile.assignedCounselor = counselorId;
+
+    const formattedDate = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const logEntry = {
+      action: 'Counseling Session Scheduled',
+      performed_by: counselorName,
+      timestamp: new Date(),
+      notes: `Session scheduled for ${formattedDate} at ${time}. Instructions: ${notes || 'Standard appointment'}`,
+    };
+
+    profile.intervention_logs.push(logEntry);
+    await profile.save();
+
+    // Synchronize CounselingSession model
+    if (CounselingSession) {
+      const studentUser = await User.findOne(filter);
+      if (studentUser) {
+        await CounselingSession.create({
+          counselor: counselorId,
+          student: studentUser._id,
+          assignedBy: counselorId,
+          notes: notes || `Session scheduled on ${formattedDate} at ${time}`,
+          status: 'Scheduled',
+          scheduledDate: new Date(date),
+        }).catch(() => {});
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Counseling session successfully scheduled for ${formattedDate} at ${time}`,
+      counseling_session: profile.counseling_session,
+      profile,
+    });
+  } catch (error) {
+    console.error('Error in scheduleSession:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Mark counseling session as completed with notes
+// @route   POST /api/counselor/complete-session
+// @access  Private (Counselor, Admin)
+exports.completeSession = async (req, res) => {
+  try {
+    const { studentId, completion_notes, notes } = req.body;
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required' });
+    }
+
+    const counselorName = req.user?.name || 'Counselor';
+    const isObjectId = mongoose.Types.ObjectId.isValid(studentId);
+    const filter = isObjectId ? { $or: [{ user: studentId }, { _id: studentId }] } : { studentId };
+
+    const profile = await StudentProfile.findOne(filter);
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const finalCompletionNotes = completion_notes || notes || 'Counseling session successfully conducted and completed.';
+
+    if (!profile.counseling_session) {
+      profile.counseling_session = {};
+    }
+
+    profile.counseling_session.status = 'COMPLETED';
+    profile.counseling_session.completion_notes = finalCompletionNotes;
+    profile.counseling_session.completed_at = new Date();
+    profile.counselingStatus = 'Resolved';
+
+    const logEntry = {
+      action: 'Counseling Session Completed',
+      performed_by: counselorName,
+      timestamp: new Date(),
+      notes: finalCompletionNotes,
+    };
+    profile.intervention_logs.push(logEntry);
+
+    // Synchronize CounselingSession model
+    if (CounselingSession) {
+      await CounselingSession.updateMany(
+        { student: profile.user },
+        { $set: { status: 'Completed' } }
+      ).catch(() => {});
+    }
+
+    // Automated Risk Recovery check:
+    // If academic plan is also COMPLETED (or NOT_REQUIRED) AND attendance >= 75% AND CGPA >= 6.0:
+    const studentUser = await User.findById(profile.user);
+    const currentAttendance = profile.attendancePercentage ?? studentUser?.attendance ?? 0;
+    const currentCgpa = profile.cgpa ?? studentUser?.cgpa ?? 0;
+    const isAcademicPlanDone =
+      !profile.academic_remedial_plan ||
+      profile.academic_remedial_plan.status === 'COMPLETED' ||
+      profile.academic_remedial_plan.status === 'NOT_REQUIRED';
+
+    if (currentAttendance >= 75 && currentCgpa >= 6.0 && isAcademicPlanDone) {
+      profile.riskLevel = 'Low Risk';
+      profile.riskCategory = 'None';
+      profile.primaryRiskCategory = 'NONE';
+      profile.intervention_logs.push({
+        action: 'System Auto-Recovery: Risk updated to Low Risk',
+        performed_by: 'Automated Recovery Engine',
+        timestamp: new Date(),
+        notes: `System Auto-Recovery: Risk transitioned to Low Risk following completed counseling and recovered metrics (Attendance: ${currentAttendance}%, CGPA: ${currentCgpa}).`,
+      });
+
+      if (studentUser) {
+        studentUser.riskLevel = 'Low Risk';
+        studentUser.riskCategory = 'None';
+        studentUser.primaryRiskCategory = 'NONE';
+        await studentUser.save();
+      }
+    }
+
+    await profile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Counseling session marked as COMPLETED',
+      counseling_session: profile.counseling_session,
+      profile,
+    });
+  } catch (error) {
+    console.error('Error in completeSession:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

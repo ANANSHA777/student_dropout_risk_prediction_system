@@ -106,6 +106,16 @@ exports.assignPlan = async (req, res) => {
     profile.assignedAcademicPlan = chosenPlanType;
     profile.academicPlan = chosenPlanType;
     profile.assignedPlan = chosenPlanType;
+    profile.academic_remedial_plan = {
+      plan_title: chosenPlanType,
+      plan_details: notes || finalPlan.studySchedule || 'Remedial academic support plan assigned.',
+      target_metrics: 'Target CGPA: ≥ 6.0, Attendance: ≥ 75%',
+      assigned_by_teacher_name: req.user?.name || 'Teacher',
+      assigned_at: new Date(),
+      status: 'IN_PROGRESS',
+      completion_notes: '',
+      completed_at: null,
+    };
     profile.academicInterventionPlan = {
       studySchedule: finalPlan.studySchedule,
       remedialClasses: finalPlan.remedialClasses,
@@ -113,6 +123,13 @@ exports.assignPlan = async (req, res) => {
       cgpaRecoveryMilestones: finalPlan.cgpaRecoveryMilestones,
       generatedAt: new Date(),
     };
+
+    profile.intervention_logs.push({
+      action: `Academic Plan Assigned: ${chosenPlanType}`,
+      performed_by: req.user?.name || 'Teacher',
+      timestamp: new Date(),
+      notes: `Academic Remedial Plan set to IN_PROGRESS. Details: ${notes || chosenPlanType}`,
+    });
 
     if (notes && notes.trim().length > 0) {
       profile.qualitativeNotes.push({

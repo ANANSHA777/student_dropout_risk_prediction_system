@@ -150,8 +150,19 @@ exports.getTeacherStudents = async (req, res) => {
         evaluation_source: profile.evaluation_source || 'AUTOMATED_AI',
         intervention_logs: profile.intervention_logs || [],
         counselingStatus: profile.counselingStatus || 'Active Review',
+        counseling_session: profile.counseling_session || {
+          status: 'PENDING_SCHEDULE',
+          date: null,
+          time: '',
+          notes: '',
+        },
         assignedAcademicPlan: profile.assignedAcademicPlan || profile.academicPlan || null,
         academicPlan: profile.academicPlan || profile.assignedAcademicPlan || null,
+        academic_remedial_plan: profile.academic_remedial_plan || {
+          status: profile.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED',
+          plan_title: profile.assignedAcademicPlan || '',
+          target_metrics: 'Target CGPA: ≥ 6.0, Attendance: ≥ 75%',
+        },
         academicInterventionPlan: profile.academicInterventionPlan || null,
         aiRecommendations: profile.aiRecommendations || [],
         qualitativeNotes: profile.qualitativeNotes || [],
@@ -727,6 +738,87 @@ exports.requestSurveyResubmission = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in requestSurveyResubmission:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Teacher marks academic remedial plan as COMPLETED
+// @route   POST /api/teacher/complete-academic-plan
+// @access  Private (Teacher, Admin)
+exports.completeAcademicPlan = async (req, res) => {
+  try {
+    const { studentId, completion_notes, notes } = req.body;
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required' });
+    }
+
+    const teacherName = req.user?.name || 'Teacher';
+    const isObjectId = mongoose.Types.ObjectId.isValid(studentId);
+    const filter = isObjectId ? { $or: [{ user: studentId }, { _id: studentId }] } : { studentId };
+
+    const profile = await StudentProfile.findOne(filter);
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const finalNotes = completion_notes || notes || 'Academic remedial plan marked as completed following review.';
+
+    if (!profile.academic_remedial_plan) {
+      profile.academic_remedial_plan = {};
+    }
+
+    profile.academic_remedial_plan.status = 'COMPLETED';
+    profile.academic_remedial_plan.completion_notes = finalNotes;
+    profile.academic_remedial_plan.completed_at = new Date();
+
+    const logEntry = {
+      action: 'Academic Plan Completed',
+      performed_by: teacherName,
+      timestamp: new Date(),
+      notes: finalNotes,
+    };
+    profile.intervention_logs.push(logEntry);
+
+    // Check automated recovery criteria:
+    // If counseling session is COMPLETED (or NOT assigned / Resolved) AND attendance >= 75% AND CGPA >= 6.0:
+    const studentUser = await User.findById(profile.user);
+    const currentAttendance = profile.attendancePercentage ?? studentUser?.attendance ?? 0;
+    const currentCgpa = profile.cgpa ?? studentUser?.cgpa ?? 0;
+    const isCounselingDone =
+      !profile.counseling_session ||
+      profile.counseling_session.status === 'COMPLETED' ||
+      profile.counselingStatus === 'Resolved' ||
+      !profile.assigned_counselor_id;
+
+    if (currentAttendance >= 75 && currentCgpa >= 6.0 && isCounselingDone) {
+      profile.riskLevel = 'Low Risk';
+      profile.riskCategory = 'None';
+      profile.primaryRiskCategory = 'NONE';
+      profile.intervention_logs.push({
+        action: 'System Auto-Recovery: Risk updated to Low Risk',
+        performed_by: 'Automated Recovery Engine',
+        timestamp: new Date(),
+        notes: `System Auto-Recovery: Risk transitioned to Low Risk following completed academic plan and recovered metrics (Attendance: ${currentAttendance}%, CGPA: ${currentCgpa}).`,
+      });
+
+      if (studentUser) {
+        studentUser.riskLevel = 'Low Risk';
+        studentUser.riskCategory = 'None';
+        studentUser.primaryRiskCategory = 'NONE';
+        await studentUser.save();
+      }
+    }
+
+    await profile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Academic remedial plan marked as COMPLETED',
+      academic_remedial_plan: profile.academic_remedial_plan,
+      profile,
+    });
+  } catch (error) {
+    console.error('Error in completeAcademicPlan:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -90,13 +90,18 @@ function evaluateStudentRootCause(student) {
   const interestStr = getValStr('academicInterest', 'academic_interest', 'studyInterest', 'interestInStudies');
   const isDisengaged = ['low', 'lost', 'disengaged', 'none', 'no interest'].some(term => interestStr.includes(term));
 
-  // Financial Stress
+  // Financial Stress - Strict Gating:
+  // Financial relief is ONLY available if financial_stress == "HIGH" OR familyIncome <= "Below ₹30,000"
+  // For financially stable students (e.g., Arshin: income > ₹60k, moderate anxiety), HIDE Request College Fund
   const finStressStr = getValStr('financialStress', 'financial_stress', 'feeWorries', 'fee_worries', 'moneyFeeWorries', 'moneyWorries');
   const finIncomeStr = getValStr('familyIncome', 'family_income', 'incomeLevel', 'income_level', 'familyMonthlyIncome');
-  const hasFinancialIssue = 
-    ['high', 'moderate', 'severe', 'critical', 'manageable'].some(term => finStressStr.includes(term)) ||
-    ['poor', 'poverty', '15,000'].some(term => finIncomeStr.includes(term)) ||
-    student.financialAidStatus === 'Pending' || student.financialAidStatus === 'Required';
+
+  const isHighFinancialStress = ['high', 'severe', 'critical'].some(term => finStressStr.includes(term));
+  const isLowIncome = ['below 30', 'below ₹30,000', 'below 30,000', '< 30000', '< 30,000', 'poor', 'poverty', '15,000'].some(term => finIncomeStr.includes(term));
+  const isHighIncome = ['above 60', 'above ₹60,000', 'above 60,000', '> 60000', '> 60,000', 'above 1,00,000', 'above 100000'].some(term => finIncomeStr.includes(term));
+  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED'].includes((student.financial_relief_status || '').toUpperCase());
+
+  const hasFinancialIssue = (isHighFinancialStress || isLowIncome || hasExistingReliefRequest) && !(isHighIncome && !isHighFinancialStress);
 
   // External Stress (Commute "More than 2 hours" & Self-Study "Less than 1 hour")
   const commuteStr = getValStr('commuteTime', 'dailyCommuteTime', 'travelTime');
@@ -106,6 +111,9 @@ function evaluateStudentRootCause(student) {
   const hasZeroOrLowStudyHours = ['less than 1', '0 hours', 'zero', '1 hour', 'less than 1 hour'].some(term => studyStr.includes(term));
 
   const hasPersonalOrFinancialRisk = hasWellnessIssue || isDisengaged || hasFinancialIssue || hasCommuteIssue || hasZeroOrLowStudyHours;
+
+  // Unsuppress Academic Plan for low metrics: CGPA < 6.0 or Attendance < 75%
+  const hasLowAcademicMetrics = (cgpa !== null && cgpa < 6.0) || (attendance !== null && attendance < 75);
 
   // 3. AI MATRIX RISK CATEGORIZATION
   let riskCategoryClassification = 'No Policy Risk';
@@ -119,13 +127,15 @@ function evaluateStudentRootCause(student) {
 
   return {
     isAcademicRisk,
+    hasLowAcademicMetrics,
     hasPersonalOrFinancialRisk,
     riskCategoryClassification,
-    showFinancialAidOption: hasFinancialIssue, // Directly enable financial aid whenever financial flags exist
+    showFinancialAidOption: hasFinancialIssue, // Strictly enabled only if financially eligible
     showCounselorBtn: hasWellnessIssue || isDisengaged || hasCommuteIssue || hasZeroOrLowStudyHours,
-    showAcademicPlanBtn: isAcademicRisk,
+    showAcademicPlanBtn: isAcademicRisk || hasLowAcademicMetrics,
   };
 }
+
 
 // --- MAIN RESOLVER LOGIC ---
 function resolveStudentFields(student) {
@@ -235,6 +245,7 @@ function StudentRosterRow({
   onAcademicIntervention,
   onAssignPlan,
   onGrantFinancialAid,
+  onCompleteAcademicPlan,
   onOpenDetailModal,
   onRequestSurveyResubmission,
 }) {
@@ -289,14 +300,14 @@ function StudentRosterRow({
     student.collegeFinancialAid?.status === 'Pending Institutional Support';
 
   const isDualRisk =
-    categoryLower.includes('dual') ||
-    (evaluationAnalysis.showFinancialAidOption && evaluationAnalysis.showCounselorBtn);
+    evaluationAnalysis.showFinancialAidOption &&
+    (categoryLower.includes('dual') || evaluationAnalysis.showCounselorBtn);
 
   const isFinancialRisk =
-    categoryLower.includes('financial') ||
-    evaluationAnalysis.showFinancialAidOption ||
-    student.financial_relief_status === 'DOCUMENTS_REQUIRED' ||
-    student.financial_relief_status === 'REQUESTED';
+    evaluationAnalysis.showFinancialAidOption &&
+    (categoryLower.includes('financial') ||
+      student.financial_relief_status === 'DOCUMENTS_REQUIRED' ||
+      student.financial_relief_status === 'REQUESTED');
 
   const isCounselingRisk =
     categoryLower.includes('wellness') ||
@@ -541,12 +552,43 @@ function StudentRosterRow({
                     type="button"
                     onClick={() => onAssignCounselor && onAssignCounselor(student)}
                     className="h-8 w-full px-3 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Supportive Counseling Protocol (Academic Penalty Suppressed)"
+                    title="Supportive Counseling Protocol"
                   >
                     <UserCheck size={13} className="text-purple-300 shrink-0" />
                     <span>Assign Counselor</span>
                   </button>
                 )}
+
+                {/* Academic plan MUST NEVER be suppressed when metrics are low (CGPA < 6.0 or Attendance < 75%) */}
+                {evaluationAnalysis.hasLowAcademicMetrics && (
+                  student.academic_remedial_plan?.status === 'IN_PROGRESS' ? (
+                    <button
+                      type="button"
+                      onClick={() => onCompleteAcademicPlan && onCompleteAcademicPlan(student)}
+                      className="h-8 w-full px-2 bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                      title="Mark academic remedial plan completed"
+                    >
+                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                      <span>Mark Plan Completed</span>
+                    </button>
+                  ) : student.academic_remedial_plan?.status === 'COMPLETED' ? (
+                    <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                      <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+                      <span className="truncate">Plan Completed</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleAcademicPlanClick}
+                      className="h-8 w-full px-2 bg-amber-900/40 text-amber-200 border border-amber-500/40 hover:bg-amber-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                      title="Academic metrics below threshold (CGPA < 6.0 or Attendance < 75%)"
+                    >
+                      <BookOpen size={13} className="text-amber-300 shrink-0" />
+                      <span>Academic Plan (Low Metrics)</span>
+                    </button>
+                  )
+                )}
+
                 <div className="text-[10px] text-purple-300/80 font-medium">
                   Supportive Counseling Priority
                 </div>
@@ -554,7 +596,22 @@ function StudentRosterRow({
             ) : (
               /* 4. PURE ACADEMIC CONCERNS ONLY (Strictly Academic Plan, Hide Non-Academic) */
               <div className="space-y-1">
-                {assignedPlan ? (
+                {student.academic_remedial_plan?.status === 'IN_PROGRESS' ? (
+                  <button
+                    type="button"
+                    onClick={() => onCompleteAcademicPlan && onCompleteAcademicPlan(student)}
+                    className="h-8 w-full px-2 bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Mark academic remedial plan completed"
+                  >
+                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    <span>Mark Plan Completed</span>
+                  </button>
+                ) : student.academic_remedial_plan?.status === 'COMPLETED' ? (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Plan Completed</span>
+                  </div>
+                ) : assignedPlan ? (
                   <div className="bg-emerald-950/50 border border-emerald-500/40 p-2 rounded-lg flex flex-col gap-1">
                     <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
                       <Check size={13} className="text-emerald-400 shrink-0" />
@@ -576,6 +633,7 @@ function StudentRosterRow({
                 <div className="text-[10px] text-amber-300/80 font-medium">Pure Academic Track</div>
               </div>
             )}
+
           </div>
         ) : (
           <span className="text-xs text-slate-500 italic">Awaiting AI Evaluation</span>
@@ -673,6 +731,7 @@ export default function StudentRosterTable({
   onAcademicIntervention,
   onAssignPlan,
   onGrantFinancialAid,
+  onCompleteAcademicPlan,
   onOpenDetailModal,
   onRequestSurveyResubmission,
   showActions = true,
@@ -724,6 +783,7 @@ export default function StudentRosterTable({
                   onAcademicIntervention={onAcademicIntervention}
                   onAssignPlan={onAssignPlan}
                   onGrantFinancialAid={onGrantFinancialAid}
+                  onCompleteAcademicPlan={onCompleteAcademicPlan}
                   onOpenDetailModal={onOpenDetailModal}
                   onRequestSurveyResubmission={onRequestSurveyResubmission}
                 />
@@ -734,4 +794,4 @@ export default function StudentRosterTable({
       </div>
     </div>
   );
-}
+}

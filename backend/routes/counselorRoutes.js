@@ -27,6 +27,14 @@ const updateCaseStatus =
   counselorController.updateCaseStatus ||
   ((req, res) => res.status(200).json({ message: 'Case status updated successfully' }));
 
+const scheduleSession =
+  counselorController.scheduleSession ||
+  ((req, res) => res.status(501).json({ message: 'scheduleSession controller missing' }));
+
+const completeSession =
+  counselorController.completeSession ||
+  ((req, res) => res.status(501).json({ message: 'completeSession controller missing' }));
+
 // Protect all routes in this file for Counselors and Admins
 router.use(protect);
 router.use(authorize('Counselor', 'Admin'));
@@ -35,6 +43,12 @@ router.use(authorize('Counselor', 'Admin'));
 
 // GET /api/counselor/cases - Get assigned at-risk student caseload
 router.get('/cases', getCounselorCases);
+
+// POST /api/counselor/schedule-session - Schedule a session with a student
+router.post('/schedule-session', scheduleSession);
+
+// POST /api/counselor/complete-session - Mark a counseling session as completed
+router.post('/complete-session', completeSession);
 
 // POST /api/counselor/students/:id/intervention - Add qualitative note / action step to student profile
 router.post('/students/:id/intervention', logInterventionNote);

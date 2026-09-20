@@ -39,6 +39,7 @@ export function StudentDetailsModal({
   onEvaluateRisk,
   onUpdateSuccess,
   role,
+  initialTab = 'overview',
 }) {
   const { user } = useAuth();
   const effectiveRole = (role || user?.role || 'Teacher').toLowerCase();
@@ -46,7 +47,7 @@ export function StudentDetailsModal({
   const isTeacher = effectiveRole === 'teacher';
   const isAdmin = effectiveRole === 'admin';
 
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'survey' | 'audit' | 'actions'
+  const [activeTab, setActiveTab] = useState(initialTab || 'overview'); // 'overview' | 'survey' | 'audit' | 'actions'
   const [fundAmount, setFundAmount] = useState('5000');
   const [fundReason, setFundReason] = useState('Tuition & Academic Relief Support');
   const [fundNotes, setFundNotes] = useState('');
@@ -66,7 +67,10 @@ export function StudentDetailsModal({
       setLocalReliefStatus(student.financial_relief_status || student.financialAidStatus || 'NONE');
       setLocalLogs(student.intervention_logs || []);
     }
-  }, [student]);
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [student, initialTab, isOpen]);
 
   if (!isOpen || !student) return null;
 
@@ -120,6 +124,22 @@ export function StudentDetailsModal({
   const isCaseB = evaluationCase === 'CASE_B_FINANCIAL_STRESS';
   const isCaseC = evaluationCase === 'CASE_C_PURE_ACADEMIC';
 
+  // Low Academic Metrics Check: Unsuppress academic remedial planning if CGPA < 6.0 or Attendance < 75%
+  const hasLowAcademicMetrics = (cgpa !== 'N/A' && Number(cgpa) < 6.0) || (attendance !== 'N/A' && Number(attendance) < 75);
+  const suppressAcademicPlan = isCaseA && !hasLowAcademicMetrics;
+
+  // Strict Financial Relief Eligibility Gating:
+  // ONLY available if financial_stress == "HIGH" OR familyIncome <= "Below ₹30,000"
+  // For financially stable students (e.g. Arshin: income > ₹60k, moderate anxiety), HIDE / GATE relief
+  const finStressStr = String(financialStress || '').toLowerCase();
+  const finIncomeStr = String(familyIncome || '').toLowerCase();
+  const isHighFinancialStress = ['high', 'severe', 'critical'].some(term => finStressStr.includes(term));
+  const isLowIncome = ['below 30', 'below ₹30,000', 'below 30,000', '< 30000', '< 30,000', 'poor', 'poverty', '15,000'].some(term => finIncomeStr.includes(term));
+  const isHighIncome = ['above 60', 'above ₹60,000', 'above 60,000', '> 60000', '> 60,000', 'above 1,00,000', 'above 100000'].some(term => finIncomeStr.includes(term));
+  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED'].includes((localReliefStatus || '').toUpperCase());
+
+  const isFinanciallyEligible = (isHighFinancialStress || isLowIncome || hasExistingReliefRequest) && !(isHighIncome && !isHighFinancialStress);
+
   const isPendingInstitutionalSupport =
     localReliefStatus === 'Pending Institutional Support' ||
     localReliefStatus === 'REQUESTED' ||
@@ -132,6 +152,36 @@ export function StudentDetailsModal({
     : [];
 
   const qualitativeNotes = Array.isArray(student.qualitativeNotes) ? student.qualitativeNotes : [];
+
+  const fundLog = (localLogs || [])
+    .slice()
+    .reverse()
+    .find((l) => {
+      const act = (l.action || '').toLowerCase();
+      return act.includes('fund') || act.includes('aid') || act.includes('relief');
+    });
+
+  const rawRequestedAmount =
+    student.collegeFinancialAid?.grantAmount ||
+    student.collegeFinancialAid?.amount ||
+    student.requestedFundAmount ||
+    5000;
+  const requestedAmountFormatted = Number(rawRequestedAmount).toLocaleString();
+
+  const requestedCategory =
+    student.collegeFinancialAid?.reason ||
+    student.collegeFinancialAid?.category ||
+    student.requestedFundReason ||
+    'Tuition & Academic Relief Support';
+
+  const requestedNotes =
+    student.collegeFinancialAid?.notes ||
+    fundLog?.notes ||
+    'Faculty initiated institutional emergency fund application to prevent student dropout.';
+
+  const requestedBy = fundLog?.performed_by || 'Department Faculty / Teacher';
+  const requestedDate = student.collegeFinancialAid?.appliedAt || fundLog?.timestamp || student.updatedAt;
+  const financialDocs = Array.isArray(student.financial_documents) ? student.financial_documents : [];
 
   const handleCollegeFundSubmit = async (e) => {
     e.preventDefault();
@@ -372,7 +422,7 @@ export function StudentDetailsModal({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-3 gap-3 text-xs">
                     <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
                       <span className="text-slate-500 block text-[11px]">Cumulative CGPA</span>
                       <span className="text-base font-bold text-white">{cgpa}</span>
@@ -389,12 +439,6 @@ export function StudentDetailsModal({
                       <span className="text-slate-500 block text-[11px]">Active Backlogs</span>
                       <span className="text-sm font-semibold text-slate-200">{backlogs}</span>
                     </div>
-                    <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                      <span className="text-slate-500 block text-[11px]">Assignments Track</span>
-                      <span className="text-sm font-semibold text-slate-200">
-                        {student.assignmentsSubmitted || 0} / {student.assignmentsTotal || 0}
-                      </span>
-                    </div>
                   </div>
 
                   {/* Active Academic Track */}
@@ -402,17 +446,27 @@ export function StudentDetailsModal({
                     <div className="font-semibold text-slate-300 flex items-center justify-between">
                       <span>Current Academic Support Track:</span>
                       <span className="text-amber-400 font-medium">
-                        {student.assignedAcademicPlan?.title || student.assignedAcademicPlan?.planType || student.assignedAcademicPlan || 'Standard Monitoring'}
+                        {student.academic_remedial_plan?.plan_title || student.assignedAcademicPlan?.title || student.assignedAcademicPlan?.planType || student.assignedAcademicPlan || 'Standard Monitoring'}
                       </span>
                     </div>
+                    {student.academic_remedial_plan?.target_metrics && (
+                      <p className="text-amber-300 text-[11px]">
+                        Target: {student.academic_remedial_plan.target_metrics}
+                      </p>
+                    )}
                     {student.academicInterventionPlan?.studySchedule && (
                       <p className="text-slate-400 text-[11px]">
                         Schedule: {student.academicInterventionPlan.studySchedule}
                       </p>
                     )}
-                    {isCaseA && (
+                    {isCaseA && !hasLowAcademicMetrics && (
                       <p className="text-purple-300 text-[11px] italic">
                         Academic penalties suppressed while student is undergoing supportive counseling.
+                      </p>
+                    )}
+                    {isCaseA && hasLowAcademicMetrics && (
+                      <p className="text-amber-300 text-[11px] font-medium">
+                        Notice: Academic remedial plan active due to low metrics (CGPA &lt; 6.0 or Attendance &lt; 75%) alongside supportive counseling.
                       </p>
                     )}
                   </div>
@@ -421,18 +475,23 @@ export function StudentDetailsModal({
                     <button
                       type="button"
                       onClick={() => onOpenAcademicPlanModal && onOpenAcademicPlanModal(student)}
-                      disabled={isCaseA}
+                      disabled={suppressAcademicPlan}
                       className={`w-full py-2 px-3 text-xs font-semibold rounded-lg border transition flex items-center justify-center gap-2 ${
-                        isCaseA
+                        suppressAcademicPlan
                           ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
                           : 'bg-amber-950/40 text-amber-300 border-amber-700/50 hover:bg-amber-900/50 cursor-pointer'
                       }`}
                     >
                       <BookOpen size={14} />
-                      {isCaseA ? 'Academic Plan Suppressed (Counseling Priority)' : 'Configure Academic Remedial Plan'}
+                      {suppressAcademicPlan
+                        ? 'Academic Plan Suppressed (Counseling Priority)'
+                        : hasLowAcademicMetrics && isCaseA
+                        ? 'Configure Academic Remedial Plan (Low Metrics Override)'
+                        : 'Configure Academic Remedial Plan'}
                     </button>
                   )}
                 </div>
+
 
                 {/* 2. NON-ACADEMIC RISK EVALUATION LOGS */}
                 <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4">
@@ -641,6 +700,216 @@ export function StudentDetailsModal({
                 Complete verifiable audit trail of faculty assignments, institutional relief requests, and counseling intervention logs.
               </p>
 
+              {/* OFFICIAL MULTI-ROLE INTERVENTION STATUS TRACKERS */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert size={15} className="text-indigo-400" />
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                      Official Multi-Role Intervention Status Trackers
+                    </h4>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">Institutional Governance Overview</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* 1. Counseling Session Tracker */}
+                  {(() => {
+                    const cSession = student.counseling_session || {};
+                    const cStatus = cSession.status || (student.assigned_counselor_id ? 'PENDING_SCHEDULE' : 'NOT_ASSIGNED');
+                    const isCompleted = cStatus === 'COMPLETED';
+                    const isConfirmed = cStatus === 'CONFIRMED_BY_STUDENT';
+                    const isScheduled = cStatus === 'SCHEDULED';
+                    const isPending = cStatus === 'PENDING_SCHEDULE';
+
+                    const statusBadgeClass = isCompleted
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                      : isConfirmed
+                      ? 'bg-blue-950/80 text-blue-300 border-blue-500/40'
+                      : isScheduled
+                      ? 'bg-indigo-950/80 text-indigo-300 border-indigo-500/40'
+                      : isPending
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-800 text-slate-400 border-slate-700';
+
+                    const statusText = isCompleted
+                      ? 'Session Completed & Resolved'
+                      : isConfirmed
+                      ? 'Attendance Confirmed'
+                      : isScheduled
+                      ? 'Session Scheduled'
+                      : isPending
+                      ? 'Assigned • Pending Schedule'
+                      : 'No Counselor Assigned';
+
+                    const displayCounselorNotes = isAdmin
+                      ? '[Confidential Counselor Clinical Note — Masked for Privacy]'
+                      : cSession.completion_notes || cSession.notes;
+
+                    return (
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-purple-300 flex items-center gap-1.5">
+                            <Heart size={12} className="text-purple-400" />
+                            Counseling Track
+                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${statusBadgeClass}`}>
+                            {statusText}
+                          </span>
+                        </div>
+                        <div className="text-xs space-y-1 text-slate-300">
+                          {cSession.date ? (
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-slate-500">Date & Time:</span>
+                              <span className="text-slate-200 font-medium">{cSession.date} at {cSession.time || 'TBD'}</span>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-slate-500 italic">
+                              {student.assigned_counselor_id ? 'Counselor assigned, awaiting slot' : 'No counselor session booked'}
+                            </div>
+                          )}
+                          {isCompleted && cSession.completed_at && (
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-slate-500">Completed:</span>
+                              <span className="text-emerald-400 font-mono text-[10px]">{formatDate(cSession.completed_at)}</span>
+                            </div>
+                          )}
+                          {displayCounselorNotes && (
+                            <p className="text-[10px] text-slate-400 italic pt-1 border-t border-slate-800/60 line-clamp-2">
+                              "{displayCounselorNotes}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 2. Academic Remedial Plan Tracker */}
+                  {(() => {
+                    const acadPlan = student.academic_remedial_plan || {};
+                    const aStatus = acadPlan.status || 'NOT_REQUIRED';
+                    const isPlanInProgress = aStatus === 'IN_PROGRESS';
+                    const isPlanCompleted = aStatus === 'COMPLETED';
+
+                    const planBadgeClass = isPlanCompleted
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                      : isPlanInProgress
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-800 text-slate-400 border-slate-700';
+
+                    const planStatusText = isPlanCompleted
+                      ? 'Plan Resolved & Completed'
+                      : isPlanInProgress
+                      ? 'Remedial Plan In Progress'
+                      : 'Not Required';
+
+                    return (
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-blue-300 flex items-center gap-1.5">
+                            <BookOpen size={12} className="text-blue-400" />
+                            Academic Plan Track
+                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${planBadgeClass}`}>
+                            {planStatusText}
+                          </span>
+                        </div>
+                        <div className="text-xs space-y-1 text-slate-300">
+                          {acadPlan.plan_title ? (
+                            <>
+                              <div className="font-semibold text-white truncate text-[11px]">
+                                {acadPlan.plan_title}
+                              </div>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-slate-500">Assigned By:</span>
+                                <span className="text-slate-200">{acadPlan.assigned_by_teacher_name || 'Faculty'}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-slate-500">Target Metrics:</span>
+                                <span className="text-indigo-300 truncate max-w-[140px]">{acadPlan.target_metrics || 'Improve Grades'}</span>
+                              </div>
+                              {isPlanCompleted && acadPlan.completed_at && (
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-slate-500">Completed:</span>
+                                  <span className="text-emerald-400 font-mono text-[10px]">{formatDate(acadPlan.completed_at)}</span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="text-[11px] text-slate-500 italic">
+                              Standard curriculum; no active remedial plan assigned
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 3. Financial Relief Tracker */}
+                  {(() => {
+                    const normalizedStatus = (localReliefStatus || student.financial_relief_status || 'NONE').toUpperCase();
+                    const isRequested = ['REQUESTED', 'PENDING INSTITUTIONAL SUPPORT', 'PENDING'].includes(normalizedStatus);
+                    const isDocs = normalizedStatus === 'DOCUMENTS_REQUIRED';
+                    const isApproved = ['APPROVED', 'DISBURSED'].includes(normalizedStatus);
+                    const isRejected = normalizedStatus === 'REJECTED';
+
+                    const relBadgeClass = isApproved
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                      : isRequested || isDocs
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                      : isRejected
+                      ? 'bg-red-950/80 text-red-300 border-red-500/40'
+                      : 'bg-slate-800 text-slate-400 border-slate-700';
+
+                    const relStatusText = isApproved
+                      ? 'Relief Approved / Disbursed'
+                      : isDocs
+                      ? 'Documents Required'
+                      : isRequested
+                      ? 'Pending Admin Review'
+                      : isRejected
+                      ? 'Request Declined'
+                      : 'No Relief Requested';
+
+                    return (
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-emerald-300 flex items-center gap-1.5">
+                            <DollarSign size={12} className="text-emerald-400" />
+                            Financial Relief Track
+                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${relBadgeClass}`}>
+                            {relStatusText}
+                          </span>
+                        </div>
+                        <div className="text-xs space-y-1 text-slate-300">
+                          {normalizedStatus !== 'NONE' ? (
+                            <>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-slate-500">Grant Amount:</span>
+                                <span className="text-emerald-400 font-bold">₹{requestedAmountFormatted}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-slate-500">Category:</span>
+                                <span className="text-slate-200 truncate max-w-[140px]">{requestedCategory}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-slate-500">Requested:</span>
+                                <span className="text-slate-400 font-mono text-[10px]">{formatDate(requestedDate)}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-[11px] text-slate-500 italic">
+                              No financial relief or grant applications submitted
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
               {interventionLogs.length === 0 ? (
                 <div className="py-8 text-center text-slate-500 italic text-xs">
                   No intervention logs recorded yet. Action events (such as Assigning a Counselor or Requesting a College Fund) will automatically append timestamped entries here.
@@ -724,36 +993,6 @@ export function StudentDetailsModal({
               normalizedStatus === 'PENDING INSTITUTIONAL SUPPORT' ||
               normalizedStatus === 'PENDING' ||
               normalizedStatus === 'PENDING REVIEW';
-
-            const fundLog = (localLogs || [])
-              .slice()
-              .reverse()
-              .find((l) => {
-                const act = (l.action || '').toLowerCase();
-                return act.includes('fund') || act.includes('aid') || act.includes('relief');
-              });
-
-            const rawRequestedAmount =
-              student.collegeFinancialAid?.grantAmount ||
-              student.collegeFinancialAid?.amount ||
-              student.requestedFundAmount ||
-              5000;
-            const requestedAmountFormatted = Number(rawRequestedAmount).toLocaleString();
-
-            const requestedCategory =
-              student.collegeFinancialAid?.reason ||
-              student.collegeFinancialAid?.category ||
-              student.requestedFundReason ||
-              'Tuition & Academic Relief Support';
-
-            const requestedNotes =
-              student.collegeFinancialAid?.notes ||
-              fundLog?.notes ||
-              'Faculty initiated institutional emergency fund application to prevent student dropout.';
-
-            const requestedBy = fundLog?.performed_by || 'Department Faculty / Teacher';
-            const requestedDate = student.collegeFinancialAid?.appliedAt || fundLog?.timestamp || student.updatedAt;
-            const financialDocs = Array.isArray(student.financial_documents) ? student.financial_documents : [];
 
             return (
               <div className="bg-linear-to-r from-emerald-950/30 via-slate-900 to-slate-900 border border-emerald-800/40 rounded-xl p-6 space-y-5">
@@ -1098,6 +1337,66 @@ export function StudentDetailsModal({
                     <h4 className="text-xs font-bold text-slate-300">Financial Relief Status: {normalizedStatus}</h4>
                     <p className="text-xs text-slate-500 max-w-md mx-auto">
                       College relief fund requests are initiated by teaching faculty and approved by administrative leadership. Counselors have read-only visibility for student holistic context.
+                    </p>
+                  </div>
+                ) : !isFinanciallyEligible && normalizedStatus === 'NONE' ? (
+                  /* INELIGIBILITY NOTICE FOR TEACHER */
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-6 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-700/80 mx-auto flex items-center justify-center text-slate-400">
+                      <DollarSign size={22} className="text-slate-500" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-200">
+                        Student Ineligible for Emergency Relief Fund
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-1 max-w-lg mx-auto leading-relaxed">
+                        Survey metrics indicate student family income ({familyIncome}) and financial stress level ({financialStress}) do not qualify for hardship relief grants. Institutional emergency relief is reserved for students facing severe economic hardship (High financial stress or Family income ≤ ₹30,000/mo).
+                      </p>
+                    </div>
+                    <div className="inline-flex items-center gap-3 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+                      <span>Family Income: <strong className="text-slate-300">{familyIncome}</strong></span>
+                      <span>•</span>
+                      <span>Financial Stress: <strong className="text-slate-300">{financialStress}</strong></span>
+                    </div>
+                  </div>
+                ) : normalizedStatus !== 'NONE' ? (
+                  /* TEACHER VIEW WHEN REQUEST ALREADY EXISTS */
+                  <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-5 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <FileText size={14} className="text-indigo-400" />
+                        Submitted Emergency Relief Request
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Submitted: {formatDate(requestedDate)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <span className="text-slate-500 block text-[11px]">Requested Grant</span>
+                        <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <span className="text-slate-500 block text-[11px]">Category</span>
+                        <span className="text-sm font-semibold text-white">{requestedCategory}</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <span className="text-slate-500 block text-[11px]">Status</span>
+                        <span className="text-sm font-semibold text-amber-300">{normalizedStatus}</span>
+                      </div>
+                    </div>
+                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+                      <span className="text-slate-500 block text-[11px] font-semibold mb-1">Faculty Case Justification:</span>
+                      <p className="text-slate-300 italic">"{requestedNotes}"</p>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {isRequestedStatus
+                        ? 'This request is pending administrative review. College leadership can approve and disburse funds directly from the Admin Portal.'
+                        : normalizedStatus === 'DOCUMENTS_REQUIRED'
+                        ? 'Administrative leadership has requested income/fee verification documents from the student.'
+                        : ['APPROVED', 'DISBURSED'].includes(normalizedStatus)
+                        ? 'Emergency relief grant has been approved and disbursed to the student account.'
+                        : 'Emergency relief request was reviewed and closed.'}
                     </p>
                   </div>
                 ) : (

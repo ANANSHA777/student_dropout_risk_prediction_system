@@ -175,6 +175,18 @@ exports.getStudentProfile = async (req, res) => {
         assigned_counselor_id: counselorId,
         assignedCounselor: counselorId,
         counselingStatus: profile.counselingStatus || 'Active Review',
+        counseling_session: profile.counseling_session || {
+          status: 'PENDING_SCHEDULE',
+          date: null,
+          time: '',
+          notes: '',
+        },
+        academic_remedial_plan: profile.academic_remedial_plan || {
+          status: profile.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED',
+          plan_title: profile.assignedAcademicPlan || '',
+          plan_details: profile.academicInterventionPlan?.studySchedule || '',
+          target_metrics: 'Target CGPA: ≥ 6.0, Attendance: ≥ 75%',
+        },
         financial_relief_status: profile.financial_relief_status || (profile.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE'),
         financialAidStatus: profile.financialAidStatus || 'Paid',
         collegeFinancialAid: profile.collegeFinancialAid || {},
@@ -492,6 +504,63 @@ exports.uploadFinancialDocument = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in uploadFinancialDocument:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get dashboard summary for student (active survey, counseling, academic plan)
+// @route   GET /api/student/dashboard-summary
+// @access  Private (Student, Admin)
+exports.getDashboardSummary = async (req, res) => {
+  return exports.getStudentProfile(req, res);
+};
+
+// @desc    Student confirms attendance for scheduled counseling session
+// @route   POST /api/student/confirm-session
+// @access  Private (Student)
+exports.confirmCounselingSession = async (req, res) => {
+  try {
+    const rawUserId = req.user?._id || req.user?.id;
+    if (!rawUserId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized request: Missing user context' });
+    }
+
+    const studentId = mongoose.Types.ObjectId.isValid(rawUserId)
+      ? new mongoose.Types.ObjectId(rawUserId)
+      : rawUserId;
+
+    const profile = await StudentProfile.findOne({
+      $or: [{ user: studentId }, { _id: studentId }],
+    });
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found.' });
+    }
+
+    if (!profile.counseling_session) {
+      profile.counseling_session = {};
+    }
+
+    profile.counseling_session.status = 'CONFIRMED_BY_STUDENT';
+
+    const logEntry = {
+      action: 'Counseling Session Confirmed by Student',
+      performed_by: req.user?.name || 'Student',
+      timestamp: new Date(),
+      notes: 'Student confirmed attendance for the scheduled counseling session.',
+    };
+
+    profile.intervention_logs.push(logEntry);
+    await profile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Counseling session attendance confirmed successfully.',
+      counseling_session: profile.counseling_session,
+      intervention_logs: profile.intervention_logs,
+    });
+  } catch (error) {
+    console.error('Error in confirmCounselingSession:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

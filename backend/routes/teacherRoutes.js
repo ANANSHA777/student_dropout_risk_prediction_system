@@ -17,6 +17,7 @@ const assignCounselorToStudent = teacherController.assignCounselorToStudent || t
 const applyCollegeFinancialAid = teacherController.applyCollegeFinancialAid || teacherController.grantFinancialAid || ((req, res) => res.status(501).json({ success: false, message: 'applyCollegeFinancialAid controller missing' }));
 const deleteStudent = teacherController.deleteStudent || ((req, res) => res.status(501).json({ success: false, message: 'deleteStudent controller missing' }));
 const requestSurveyResubmission = teacherController.requestSurveyResubmission || ((req, res) => res.status(501).json({ success: false, message: 'requestSurveyResubmission controller missing' }));
+const completeAcademicPlan = teacherController.completeAcademicPlan || ((req, res) => res.status(501).json({ success: false, message: 'completeAcademicPlan controller missing' }));
 
 // Secure all teacher routes for Teachers and Admins
 router.use(protect);
@@ -45,6 +46,11 @@ router.get('/counselors', getRegisteredCounselors);
 router.post('/students/:id/assign-counselor', assignCounselorToStudent);
 router.post('/students/:id/grant-aid', applyCollegeFinancialAid);
 router.post('/students/:id/grant-financial-aid', applyCollegeFinancialAid); // Alias for frontend compatibility
+router.post('/complete-academic-plan', completeAcademicPlan);
+router.post('/students/:id/complete-academic-plan', (req, res) => {
+  req.body.studentId = req.params.id;
+  return completeAcademicPlan(req, res);
+});
 router.post('/request-survey-resubmission', requestSurveyResubmission);
 router.post('/students/:id/request-survey-resubmission', (req, res) => {
   req.body.studentId = req.params.id;

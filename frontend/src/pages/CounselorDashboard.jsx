@@ -24,6 +24,8 @@ import {
   fetchCounselorCases,
   logInterventionNote,
   updateCaseStatus,
+  scheduleCounselingSession,
+  completeCounselingSession,
 } from '../services/counselorService';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import StudentDetailModal from '../components/StudentDetailModal';
@@ -39,6 +41,20 @@ export default function CounselorDashboard() {
   // Modals & Feedback
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [actionFeedback, setActionFeedback] = useState(null);
+
+  // Schedule Session Modal State
+  const [selectedStudentForSchedule, setSelectedStudentForSchedule] = useState(null);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('14:00');
+  const [scheduleNotes, setScheduleNotes] = useState('');
+  const [isSubmittingSchedule, setIsSubmittingSchedule] = useState(false);
+
+  // Complete Session Modal State
+  const [selectedStudentForComplete, setSelectedStudentForComplete] = useState(null);
+  const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
+  const [completionNotes, setCompletionNotes] = useState('');
+  const [isSubmittingComplete, setIsSubmittingComplete] = useState(false);
 
   // Intervention Modal State
   const [selectedStudentForIntervention, setSelectedStudentForIntervention] = useState(null);
@@ -108,6 +124,72 @@ export default function CounselorDashboard() {
       );
     } catch (err) {
       alert(`Failed to update status: ${err.message}`);
+    }
+  };
+
+  // Open Schedule Session Modal
+  const handleOpenScheduleModal = (student) => {
+    setSelectedStudentForSchedule(student);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setScheduleDate(tomorrow.toISOString().split('T')[0]);
+    setScheduleTime('14:00');
+    setScheduleNotes('');
+    setIsScheduleModalOpen(true);
+  };
+
+  // Submit Schedule Session
+  const handleSubmitSchedule = async (e) => {
+    e.preventDefault();
+    if (!selectedStudentForSchedule) return;
+
+    setIsSubmittingSchedule(true);
+    const studentId = selectedStudentForSchedule._id || selectedStudentForSchedule.id;
+    try {
+      await scheduleCounselingSession(studentId, {
+        date: scheduleDate,
+        time: scheduleTime,
+        notes: scheduleNotes,
+      });
+
+      showFeedback(`Counseling session scheduled for ${selectedStudentForSchedule.name}`);
+      setIsScheduleModalOpen(false);
+      setSelectedStudentForSchedule(null);
+      await loadCases();
+    } catch (err) {
+      alert(`Error scheduling session: ${err.message}`);
+    } finally {
+      setIsSubmittingSchedule(false);
+    }
+  };
+
+  // Open Complete Session Modal
+  const handleOpenCompleteModal = (student) => {
+    setSelectedStudentForComplete(student);
+    setCompletionNotes('');
+    setIsCompleteModalOpen(true);
+  };
+
+  // Submit Complete Session
+  const handleSubmitComplete = async (e) => {
+    e.preventDefault();
+    if (!selectedStudentForComplete) return;
+
+    setIsSubmittingComplete(true);
+    const studentId = selectedStudentForComplete._id || selectedStudentForComplete.id;
+    try {
+      await completeCounselingSession(studentId, {
+        completion_notes: completionNotes,
+      });
+
+      showFeedback(`Counseling session marked as COMPLETED for ${selectedStudentForComplete.name}`);
+      setIsCompleteModalOpen(false);
+      setSelectedStudentForComplete(null);
+      await loadCases();
+    } catch (err) {
+      alert(`Error completing session: ${err.message}`);
+    } finally {
+      setIsSubmittingComplete(false);
     }
   };
 
@@ -275,6 +357,7 @@ export default function CounselorDashboard() {
                   <th className="p-3.5">Risk Tier</th>
                   <th className="p-3.5">Primary Concern</th>
                   <th className="p-3.5">Self-Reported Status</th>
+                  <th className="p-3.5">Session Status</th>
                   <th className="p-3.5">Case Status</th>
                   <th className="p-3.5 text-right">Actions</th>
                 </tr>
@@ -282,7 +365,7 @@ export default function CounselorDashboard() {
               <tbody className="divide-y divide-slate-800/60 text-sm">
                 {cases.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="p-8 text-center text-slate-500 italic">
+                    <td colSpan="7" className="p-8 text-center text-slate-500 italic">
                       No wellness intervention cases assigned yet.
                     </td>
                   </tr>
@@ -291,6 +374,8 @@ export default function CounselorDashboard() {
                     const studentId = item._id || item.id;
                     const isHigh = String(item.riskLevel || '').toLowerCase().includes('high');
                     const isMedium = String(item.riskLevel || '').toLowerCase().includes('medium');
+                    const session = item.counseling_session;
+                    const sessionStatus = session?.status || 'PENDING_SCHEDULE';
 
                     return (
                       <tr key={studentId} className="hover:bg-slate-800/30 transition">
@@ -333,6 +418,48 @@ export default function CounselorDashboard() {
                           </span>
                         </td>
 
+                        {/* Counseling Session Status */}
+                        <td className="p-3.5">
+                          {sessionStatus === 'COMPLETED' ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-500/40">
+                                Completed
+                              </span>
+                              {session?.completed_at && (
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  {new Date(session.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </div>
+                              )}
+                            </div>
+                          ) : sessionStatus === 'CONFIRMED_BY_STUDENT' ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-950/60 text-indigo-300 border border-indigo-500/40">
+                                Confirmed by Student
+                              </span>
+                              {session?.date && (
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  {new Date(session.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {session.time}
+                                </div>
+                              )}
+                            </div>
+                          ) : sessionStatus === 'SCHEDULED' ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-950/60 text-purple-300 border border-purple-500/40 animate-pulse">
+                                Scheduled
+                              </span>
+                              {session?.date && (
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  {new Date(session.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {session.time}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800/80 text-slate-400 border border-slate-700">
+                              Pending Schedule
+                            </span>
+                          )}
+                        </td>
+
                         {/* Case Status Dropdown */}
                         <td className="p-3.5">
                           <select
@@ -349,25 +476,52 @@ export default function CounselorDashboard() {
 
                         {/* Actions */}
                         <td className="p-3.5 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            {/* Schedule Button */}
+                            {(!session || !session.status || session.status === 'PENDING_SCHEDULE' || session.status === 'CANCELLED') && (
+                              <button
+                                onClick={() => handleOpenScheduleModal(item)}
+                                className="bg-purple-950/60 hover:bg-purple-900/70 text-purple-300 border border-purple-700/60 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
+                                title="Schedule counseling appointment with student"
+                              >
+                                <Clock size={13} />
+                                <span>Schedule</span>
+                              </button>
+                            )}
+
+                            {/* Mark Session Complete Button */}
+                            {(sessionStatus === 'SCHEDULED' || sessionStatus === 'CONFIRMED_BY_STUDENT') && (
+                              <button
+                                onClick={() => handleOpenCompleteModal(item)}
+                                className="bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-500/50 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
+                                title="Mark session conducted and completed with notes"
+                              >
+                                <CheckCircle2 size={13} />
+                                <span>Complete</span>
+                              </button>
+                            )}
+
+                            {/* Log Note Button */}
+                            <button
+                              onClick={() => handleOpenInterventionModal(item)}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer active:scale-95"
+                              title="Log qualitative counseling note to audit trail"
+                            >
+                              <FilePlus2 size={13} />
+                              <span>Log Note</span>
+                            </button>
+
+                            {/* Details Button */}
                             <button
                               onClick={() => {
                                 setSelectedStudentForDetail(item);
                                 setIsDetailModalOpen(true);
                               }}
-                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
                               title="View full student background and audit history"
                             >
                               <Eye size={13} />
                               <span>Details</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleOpenInterventionModal(item)}
-                              className="bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-800/60 px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer active:scale-95"
-                            >
-                              <FilePlus2 size={13} />
-                              <span>Log Intervention</span>
                             </button>
                           </div>
                         </td>
@@ -376,6 +530,7 @@ export default function CounselorDashboard() {
                   })
                 )}
               </tbody>
+
             </table>
           </div>
         </section>
@@ -513,6 +668,174 @@ export default function CounselorDashboard() {
           </div>
         </div>
       )}
+
+      {/* Schedule Counseling Session Modal */}
+      {isScheduleModalOpen && selectedStudentForSchedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-[#0b0f19] border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
+            <div className="p-5 border-b border-slate-800 bg-[#080c14] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                  <Clock size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Schedule Counseling Session</h3>
+                  <p className="text-xs text-slate-400">
+                    Student: <span className="text-purple-300 font-semibold">{selectedStudentForSchedule.name}</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsScheduleModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitSchedule} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Session Date <span className="text-red-400">*</span></label>
+                  <input
+                    type="date"
+                    required
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Session Time <span className="text-red-400">*</span></label>
+                  <input
+                    type="time"
+                    required
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Instructions / Topic Notes</label>
+                <textarea
+                  rows={3}
+                  value={scheduleNotes}
+                  onChange={(e) => setScheduleNotes(e.target.value)}
+                  placeholder="e.g., Bi-weekly wellness check-in, stress management strategies, review academic workload..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsScheduleModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-semibold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingSchedule}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-semibold transition flex items-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+                >
+                  {isSubmittingSchedule ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Scheduling...
+                    </>
+                  ) : (
+                    <>
+                      <Clock size={14} />
+                      Schedule & Notify Student
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Complete Counseling Session Modal */}
+      {isCompleteModalOpen && selectedStudentForComplete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-[#0b0f19] border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
+            <div className="p-5 border-b border-slate-800 bg-[#080c14] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <CheckCircle2 size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Mark Session as Completed</h3>
+                  <p className="text-xs text-slate-400">
+                    Student: <span className="text-emerald-300 font-semibold">{selectedStudentForComplete.name}</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsCompleteModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitComplete} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Session Outcome & Completion Notes <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  value={completionNotes}
+                  onChange={(e) => setCompletionNotes(e.target.value)}
+                  placeholder="Record session outcomes, student progress, mental state improvement, and resolution status..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg text-emerald-300 text-[11px] leading-relaxed">
+                Completing this session marks the counseling case as Resolved. If the student's academic metrics also meet thresholds (Attendance ≥ 75% and CGPA ≥ 6.0), the system will automatically initiate risk recovery to Low Risk.
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCompleteModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-semibold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingComplete}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition flex items-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+                >
+                  {isSubmittingComplete ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Completing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={14} />
+                      Complete Session & Resolve Case
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+}
+

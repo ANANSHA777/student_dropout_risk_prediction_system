@@ -280,6 +280,37 @@ export default function AdminDashboard() {
   const teacherCount = staffList.filter((s) => s.role === 'Teacher').length;
   const counselorCount = staffList.filter((s) => s.role === 'Counselor').length;
 
+  // Multi-Role Intervention Resolution Tracking Stats
+  const counselingStats = useMemo(() => {
+    let totalAssigned = 0;
+    let completed = 0;
+    (students || []).forEach((s) => {
+      const hasCounselor = s.assigned_counselor_id || s.assignedCounselor || s.counseling_session;
+      if (hasCounselor) {
+        totalAssigned += 1;
+        if (s.counseling_session?.status === 'COMPLETED') {
+          completed += 1;
+        }
+      }
+    });
+    return { completed, total: totalAssigned };
+  }, [students]);
+
+  const academicPlanStats = useMemo(() => {
+    let totalAssigned = 0;
+    let completed = 0;
+    (students || []).forEach((s) => {
+      const plan = s.academic_remedial_plan;
+      if (plan && plan.status && plan.status !== 'NOT_REQUIRED') {
+        totalAssigned += 1;
+        if (plan.status === 'COMPLETED') {
+          completed += 1;
+        }
+      }
+    });
+    return { completed, total: totalAssigned };
+  }, [students]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
       {/* Header */}
@@ -362,6 +393,22 @@ export default function AdminDashboard() {
           }`}
         >
           <BarChart3 size={18} /> Student Risk & Department Analytics
+          {counselingStats.total > 0 && (
+            <span
+              className="ml-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-950 text-purple-300 border border-purple-500/40"
+              title="Completed Counseling Sessions"
+            >
+              Sessions: {counselingStats.completed}/{counselingStats.total}
+            </span>
+          )}
+          {academicPlanStats.total > 0 && (
+            <span
+              className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-950 text-blue-300 border border-blue-500/40"
+              title="Resolved Academic Plans"
+            >
+              Plans: {academicPlanStats.completed}/{academicPlanStats.total}
+            </span>
+          )}
         </button>
 
         <button
@@ -473,6 +520,116 @@ export default function AdminDashboard() {
         {/* MODE 2: STUDENT RISK ANALYTICS & DEPARTMENT ROSTER */}
         {viewMode === 'analytics' && (
           <div className="space-y-8">
+            {/* MULTI-ROLE INTERVENTION GOVERNANCE & RESOLUTION KPI BAR */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Counseling Sessions Resolved Badge */}
+              <div className="bg-slate-900 border border-purple-500/30 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-purple-400 font-semibold uppercase tracking-wider block">
+                    Counseling Case Resolution
+                  </span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-2xl font-bold text-white">
+                      {counselingStats.completed}
+                    </span>
+                    <span className="text-sm text-slate-400 font-medium">
+                      / {counselingStats.total} Sessions Resolved
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                    <div
+                      className="bg-purple-500 h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${counselingStats.total > 0 ? (counselingStats.completed / counselingStats.total) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-purple-950/60 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                  <HeartHandshake size={22} />
+                </div>
+              </div>
+
+              {/* Academic Remedial Plans Resolved Badge */}
+              <div className="bg-slate-900 border border-blue-500/30 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-blue-400 font-semibold uppercase tracking-wider block">
+                    Remedial Plans Resolved
+                  </span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-2xl font-bold text-white">
+                      {academicPlanStats.completed}
+                    </span>
+                    <span className="text-sm text-slate-400 font-medium">
+                      / {academicPlanStats.total} Plans Completed
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                    <div
+                      className="bg-blue-500 h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${academicPlanStats.total > 0 ? (academicPlanStats.completed / academicPlanStats.total) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-blue-950/60 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                  <GraduationCap size={22} />
+                </div>
+              </div>
+
+              {/* Pending Financial Relief Requests Badge */}
+              <div className="bg-slate-900 border border-amber-500/30 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-amber-400 font-semibold uppercase tracking-wider block">
+                    Pending Financial Aid
+                  </span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-2xl font-bold text-amber-300">
+                      {pendingReliefCount}
+                    </span>
+                    <span className="text-sm text-slate-400 font-medium">
+                      / {financialRequests.length} Applications
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                    <div
+                      className="bg-amber-500 h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${financialRequests.length > 0 ? ((financialRequests.length - pendingReliefCount) / financialRequests.length) * 100 : 100}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-amber-950/60 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <DollarSign size={22} />
+                </div>
+              </div>
+
+              {/* Faculty & Staff Active Oversight Badge */}
+              <div className="bg-slate-900 border border-emerald-500/30 p-5 rounded-2xl shadow-xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-emerald-400 font-semibold uppercase tracking-wider block">
+                    Staff Oversight
+                  </span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-2xl font-bold text-white">
+                      {staffList.length}
+                    </span>
+                    <span className="text-sm text-slate-400 font-medium">
+                      Active Educators
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2 truncate">
+                    {teacherCount} Teachers • {counselorCount} Counselors
+                  </p>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-emerald-950/60 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Users size={22} />
+                </div>
+              </div>
+            </div>
+
             {/* VISUAL RISK ANALYTICS CHARTS */}
             <RiskAnalyticsCharts analytics={mergedAnalytics} />
 

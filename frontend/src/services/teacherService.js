@@ -260,3 +260,13 @@ export const requestSurveyResubmission = async (studentId) => {
   });
   return handleResponse(res, 'Failed to authorize survey re-submission');
 };
+
+// 11. Mark Academic Remedial Plan as Completed
+export const completeAcademicPlan = async (studentId, { completion_notes } = {}) => {
+  const res = await fetch(`${API_BASE}/complete-academic-plan`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ studentId, completion_notes }),
+  });
+  return handleResponse(res, 'Failed to mark academic plan as completed');
+};

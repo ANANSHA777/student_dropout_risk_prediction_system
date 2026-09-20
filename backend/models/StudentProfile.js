@@ -364,6 +364,19 @@ const studentProfileSchema = new mongoose.Schema(
       enum: ['Active Review', 'In Progress', 'Resolved', 'Escalated', 'Referral Initiated', 'Assigned', 'Pending Contact'],
       default: 'Active Review',
     },
+    counseling_session: {
+      date: { type: Date, default: null },
+      time: { type: String, default: '' },
+      notes: { type: String, default: '' },
+      counselor_name: { type: String, default: '' },
+      status: {
+        type: String,
+        enum: ['PENDING_SCHEDULE', 'SCHEDULED', 'CONFIRMED_BY_STUDENT', 'COMPLETED', 'CANCELLED'],
+        default: 'PENDING_SCHEDULE',
+      },
+      completion_notes: { type: String, default: '' },
+      completed_at: { type: Date, default: null },
+    },
     assignedPlan: {
       type: String,
       default: null,
@@ -375,6 +388,20 @@ const studentProfileSchema = new mongoose.Schema(
     academicPlan: {
       type: String,
       default: null,
+    },
+    academic_remedial_plan: {
+      plan_title: { type: String, default: '' },
+      plan_details: { type: String, default: '' },
+      target_metrics: { type: String, default: '' },
+      assigned_by_teacher_name: { type: String, default: '' },
+      assigned_at: { type: Date, default: null },
+      status: {
+        type: String,
+        enum: ['NOT_REQUIRED', 'IN_PROGRESS', 'COMPLETED'],
+        default: 'NOT_REQUIRED',
+      },
+      completion_notes: { type: String, default: '' },
+      completed_at: { type: Date, default: null },
     },
     academicInterventionPlan: {
       studySchedule: { type: String, default: '' },

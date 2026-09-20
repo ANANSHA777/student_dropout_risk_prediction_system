@@ -39,3 +39,25 @@ export const updateCaseStatus = async (studentId, status) => {
   if (!res.ok) throw new Error(data.message || 'Failed to update case status');
   return data;
 };
+
+export const scheduleCounselingSession = async (studentId, { date, time, notes }) => {
+  const res = await fetch(`${API_BASE_URL}/schedule-session`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ studentId, date, time, notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to schedule counseling session');
+  return data;
+};
+
+export const completeCounselingSession = async (studentId, { completion_notes }) => {
+  const res = await fetch(`${API_BASE_URL}/complete-session`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ studentId, completion_notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to complete counseling session');
+  return data;
+};

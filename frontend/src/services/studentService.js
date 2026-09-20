@@ -35,3 +35,22 @@ export const uploadFinancialDocument = async (docData) => {
   if (!res.ok) throw new Error(data.message || 'Failed to upload document');
   return data;
 };
+
+export const fetchDashboardSummary = async () => {
+  const res = await fetch(`${API_BASE_URL}/dashboard-summary`, {
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to fetch dashboard summary');
+  return data.profile || data;
+};
+
+export const confirmCounselingSession = async () => {
+  const res = await fetch(`${API_BASE_URL}/confirm-session`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to confirm counseling session');
+  return data;
+};

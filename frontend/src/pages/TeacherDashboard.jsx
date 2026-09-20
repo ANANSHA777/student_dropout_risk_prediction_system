@@ -12,6 +12,7 @@ import {
   assignCounselorToStudent,
   requestCollegeFund,
   requestSurveyResubmission,
+  completeAcademicPlan,
 } from '../services/teacherService';
 import TeacherStats from '../components/TeacherStats';
 import StudentRosterTable from '../components/StudentRosterTable';
@@ -42,6 +43,7 @@ const TeacherDashboard = () => {
   const [isAcademicPlanModalOpen, setIsAcademicPlanModalOpen] = useState(false);
   const [isCounselorModalOpen, setIsCounselorModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [detailModalTab, setDetailModalTab] = useState('overview');
   const [isFinancialAidModalOpen, setIsFinancialAidModalOpen] = useState(false);
   
   const [selectedStudentForPlan, setSelectedStudentForPlan] = useState(null);
@@ -239,15 +241,33 @@ const TeacherDashboard = () => {
   };
 
   // Open Student Detail Panel
-  const handleOpenDetailModal = (student) => {
+  const handleOpenDetailModal = (student, tab = 'overview') => {
     setSelectedStudentForDetail(student);
+    setDetailModalTab(tab);
     setIsDetailModalOpen(true);
   };
 
-  // Open Financial Aid / College Fund Modal
+  // Open Financial Aid / College Fund Modal (switched directly to Emergency Relief tab)
   const handleOpenFinancialAidModal = (student) => {
-    setSelectedStudentForAid(student);
-    setIsFinancialAidModalOpen(true);
+    handleOpenDetailModal(student, 'actions');
+  };
+
+  // Mark Academic Remedial Plan as Completed
+  const handleCompleteAcademicPlan = async (student) => {
+    const studentId = student._id || student.id || student.studentId;
+    const notes = window.prompt(
+      `Enter completion review notes for ${student.name}'s academic remedial plan:`,
+      'Academic remedial milestones completed. Attendance and marks recovered.'
+    );
+    if (notes === null) return;
+
+    try {
+      await completeAcademicPlan(studentId, { completion_notes: notes });
+      await loadData();
+      showFeedback(`Academic remedial plan marked as COMPLETED for ${student.name}.`);
+    } catch (err) {
+      setError(`Failed to complete academic plan: ${err.message}`);
+    }
   };
 
   // Submit Emergency Financial Aid / College Fund Grant
@@ -436,6 +456,7 @@ const TeacherDashboard = () => {
             onAssignCounselor={handleOpenCounselorModal}
             onOpenDetailModal={handleOpenDetailModal}
             onGrantFinancialAid={handleOpenFinancialAidModal}
+            onCompleteAcademicPlan={handleCompleteAcademicPlan}
             onRequestSurveyResubmission={handleRequestSurveyResubmission}
           />
         </div>
@@ -445,6 +466,7 @@ const TeacherDashboard = () => {
       <StudentDetailModal
         student={selectedStudentForDetail}
         isOpen={isDetailModalOpen}
+        initialTab={detailModalTab}
         onClose={() => setIsDetailModalOpen(false)}
         onOpenCounselorModal={(s) => {
           setSelectedStudentForCounselor(s);
