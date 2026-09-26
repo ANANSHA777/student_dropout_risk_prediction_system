@@ -301,9 +301,10 @@ export default function AdminDashboard() {
     let completed = 0;
     (students || []).forEach((s) => {
       const plan = s.academic_remedial_plan;
-      if (plan && plan.status && plan.status !== 'NOT_REQUIRED') {
+      const status = (plan?.status || (s.assignedAcademicPlan ? 'IN_PROGRESS' : '')).toUpperCase();
+      if (status && status !== 'NOT_REQUIRED') {
         totalAssigned += 1;
-        if (plan.status === 'COMPLETED') {
+        if (status === 'COMPLETED') {
           completed += 1;
         }
       }

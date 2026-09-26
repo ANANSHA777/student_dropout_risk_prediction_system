@@ -412,8 +412,114 @@ function StudentRosterRow({
       {/* Recommended Interventions (Teacher view) OR Actions Logged (Admin view) */}
       <td className="py-4 px-5">
         {!showActions ? (
-          /* ADMIN VIEW: ACTIONS LOGGED */
+          /* ADMIN VIEW: ACTIONS LOGGED & OFFICIAL GOVERNANCE STATUS BADGES */
           <div className="space-y-2 min-w-[170px] max-w-[240px]">
+            {/* Official Completion Status Badges */}
+            <div className="flex flex-col gap-1 w-full">
+              {/* 1. Counseling Status Pill */}
+              {(() => {
+                const hasCounselor = Boolean(
+                  student.assigned_counselor_id ||
+                  student.assignedCounselor ||
+                  student.counselor ||
+                  student.counselorAssigned
+                );
+                const cStatus = (student.counseling_session?.status || '').toUpperCase();
+
+                let badgeText = 'Pending Counselor Assignment';
+                let badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
+
+                if (!hasCounselor) {
+                  badgeText = 'Pending Counselor Assignment';
+                  badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
+                } else if (cStatus === 'COMPLETED') {
+                  badgeText = 'Counseling Completed';
+                  badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40';
+                } else if (cStatus === 'CONFIRMED_BY_STUDENT') {
+                  badgeText = 'Counseling: Confirmed by Student';
+                  badgeClass = 'bg-blue-950/80 text-blue-300 border-blue-500/40';
+                } else if (cStatus === 'SCHEDULED') {
+                  badgeText = 'Counseling: Scheduled';
+                  badgeClass = 'bg-indigo-950/80 text-indigo-300 border-indigo-500/40';
+                } else {
+                  badgeText = 'Counseling: Pending Schedule';
+                  badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/40';
+                }
+
+                return (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold border truncate ${badgeClass}`}
+                    title={`Official Counseling Status: ${badgeText}`}
+                  >
+                    {badgeText}
+                  </span>
+                );
+              })()}
+
+              {/* 2. Academic Remedial Plan Status Pill */}
+              {(() => {
+                const acadPlan = student.academic_remedial_plan;
+                const aStatus = (acadPlan?.status || (student.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
+
+                let badgeText = 'Plan: Not Required';
+                let badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
+
+                if (aStatus === 'COMPLETED') {
+                  badgeText = 'Academic Plan Completed';
+                  badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40';
+                } else if (aStatus === 'IN_PROGRESS') {
+                  badgeText = 'Plan: In Progress';
+                  badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/40';
+                } else {
+                  badgeText = 'Plan: Not Required';
+                  badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
+                }
+
+                return (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold border truncate ${badgeClass}`}
+                    title={`Official Academic Plan Status: ${badgeText}`}
+                  >
+                    {badgeText}
+                  </span>
+                );
+              })()}
+
+              {/* 3. Financial Aid Status Pill */}
+              {(() => {
+                const fStatus = (
+                  student.financial_relief_status ||
+                  (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')
+                ).toUpperCase();
+
+                let badgeText = 'No Financial Need';
+                let badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
+
+                if (fStatus === 'APPROVED' || fStatus === 'DISBURSED') {
+                  badgeText = 'Fund Disbursed';
+                  badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40';
+                } else if (fStatus === 'DOCUMENTS_REQUIRED') {
+                  badgeText = 'Documents Requested';
+                  badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/40';
+                } else if (fStatus === 'REQUESTED') {
+                  badgeText = 'Fund Requested';
+                  badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/40';
+                } else {
+                  badgeText = 'No Financial Need';
+                  badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
+                }
+
+                return (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold border truncate ${badgeClass}`}
+                    title={`Official Financial Relief Status: ${badgeText}`}
+                  >
+                    {badgeText}
+                  </span>
+                );
+              })()}
+            </div>
+
             {student.intervention_logs && student.intervention_logs.length > 0 ? (
               <div className="space-y-1">
                 <div className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
@@ -460,180 +566,177 @@ function StudentRosterRow({
           </div>
         ) : isRiskEvaluated ? (
           /* TEACHER VIEW: RECOMMENDED INTERVENTIONS */
-          <div className="flex flex-col gap-2 min-w-[170px] max-w-[220px]">
-            {/* 1. DUAL RISK: BOTH College Fund & Assign Counselor */}
-            {isDualRisk ? (
-              <div className="space-y-1.5">
-                {/* College Fund Request / Status */}
-                {student.financial_relief_status === 'DOCUMENTS_REQUIRED' ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/50 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
-                    <Clock size={12} className="text-amber-400 shrink-0" />
-                    <span className="truncate">Docs Required</span>
-                  </div>
-                ) : student.financial_relief_status === 'APPROVED' || student.financial_relief_status === 'DISBURSED' ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
-                    <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">Fund Approved</span>
-                  </div>
-                ) : isPendingInstitutionalSupport ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
-                    <DollarSign size={12} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">Pending Support</span>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onGrantFinancialAid && onGrantFinancialAid(student)}
-                    className="h-8 w-full px-2.5 bg-emerald-900/40 text-emerald-200 border border-emerald-500/50 hover:bg-emerald-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                  >
-                    <DollarSign size={13} className="text-emerald-300 shrink-0" />
-                    <span>Request College Fund</span>
-                  </button>
-                )}
+          <div className="flex flex-col gap-1.5 min-w-[170px] max-w-[220px]">
+            {/* 1. Academic Remedial Plan Module */}
+            {(() => {
+              const hasAcademicRisk =
+                (cgpaVal !== null && Number(cgpaVal) < 6.0) ||
+                (attendanceVal !== null && Number(attendanceVal) < 75) ||
+                evaluationAnalysis.hasLowAcademicMetrics;
 
-                {/* Counselor Assignment */}
-                {assignedCounselor ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
-                    <UserCheck size={12} className="text-purple-400 shrink-0" />
-                    <span className="truncate">Counselor Assigned</span>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
-                    className="h-8 w-full px-2.5 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                  >
-                    <UserCheck size={13} className="text-purple-300 shrink-0" />
-                    <span>Assign Counselor</span>
-                  </button>
-                )}
-                <div className="text-[10px] text-rose-300/90 font-medium">Dual Risk: Financial + Wellness</div>
-              </div>
-            ) : isFinancialRisk ? (
-              /* 2. FINANCIAL HARDSHIP ONLY */
-              <div className="space-y-1.5">
-                {student.financial_relief_status === 'DOCUMENTS_REQUIRED' ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/50 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
-                    <Clock size={12} className="text-amber-400 shrink-0" />
-                    <span className="truncate">Docs Required</span>
-                  </div>
-                ) : student.financial_relief_status === 'APPROVED' || student.financial_relief_status === 'DISBURSED' ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
-                    <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">Fund Approved</span>
-                  </div>
-                ) : isPendingInstitutionalSupport ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
-                    <DollarSign size={12} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">Pending Support</span>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onGrantFinancialAid && onGrantFinancialAid(student)}
-                    className="h-8 w-full px-2.5 bg-emerald-900/40 text-emerald-200 border border-emerald-500/50 hover:bg-emerald-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                  >
-                    <DollarSign size={13} className="text-emerald-300 shrink-0" />
-                    <span>Request College Fund</span>
-                  </button>
-                )}
-                <div className="text-[10px] text-emerald-300/80 font-medium">Financial Relief Track</div>
-              </div>
-            ) : isCounselingRisk ? (
-              /* 3. WELLNESS / DISENGAGEMENT ONLY */
-              <div className="space-y-1.5">
-                {assignedCounselor ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full">
-                    <UserCheck size={12} className="text-purple-400 shrink-0" />
-                    <span className="truncate">Counselor Assigned</span>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
-                    className="h-8 w-full px-3 bg-purple-900/40 text-purple-200 border border-purple-500/50 hover:bg-purple-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Supportive Counseling Protocol"
-                  >
-                    <UserCheck size={13} className="text-purple-300 shrink-0" />
-                    <span>Assign Counselor</span>
-                  </button>
-                )}
+              const acadPlan = student.academic_remedial_plan;
+              const acadPlanStatus = (acadPlan?.status || (assignedPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
 
-                {/* Academic plan MUST NEVER be suppressed when metrics are low (CGPA < 6.0 or Attendance < 75%) */}
-                {evaluationAnalysis.hasLowAcademicMetrics && (
-                  student.academic_remedial_plan?.status === 'IN_PROGRESS' ? (
-                    <button
-                      type="button"
-                      onClick={() => onCompleteAcademicPlan && onCompleteAcademicPlan(student)}
-                      className="h-8 w-full px-2 bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                      title="Mark academic remedial plan completed"
-                    >
-                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                      <span>Mark Plan Completed</span>
-                    </button>
-                  ) : student.academic_remedial_plan?.status === 'COMPLETED' ? (
-                    <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
-                      <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
-                      <span className="truncate">Plan Completed</span>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleAcademicPlanClick}
-                      className="h-8 w-full px-2 bg-amber-900/40 text-amber-200 border border-amber-500/40 hover:bg-amber-800/50 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                      title="Academic metrics below threshold (CGPA < 6.0 or Attendance < 75%)"
-                    >
-                      <BookOpen size={13} className="text-amber-300 shrink-0" />
-                      <span>Academic Plan (Low Metrics)</span>
-                    </button>
-                  )
-                )}
-
-                <div className="text-[10px] text-purple-300/80 font-medium">
-                  Supportive Counseling Priority
-                </div>
-              </div>
-            ) : (
-              /* 4. PURE ACADEMIC CONCERNS ONLY (Strictly Academic Plan, Hide Non-Academic) */
-              <div className="space-y-1">
-                {student.academic_remedial_plan?.status === 'IN_PROGRESS' ? (
+              if (acadPlanStatus === 'COMPLETED') {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/60 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Academic Plan Completed</span>
+                  </div>
+                );
+              }
+              if (acadPlanStatus === 'IN_PROGRESS') {
+                return (
                   <button
                     type="button"
                     onClick={() => onCompleteAcademicPlan && onCompleteAcademicPlan(student)}
-                    className="h-8 w-full px-2 bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Mark academic remedial plan completed"
+                    className="h-8 w-full px-2 bg-blue-950/70 hover:bg-blue-900/80 text-blue-200 border border-blue-500/40 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Click to mark academic remedial plan as completed"
                   >
-                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                    <span>Mark Plan Completed</span>
+                    <Clock size={13} className="text-blue-300 shrink-0" />
+                    <span>Plan: In Progress</span>
                   </button>
-                ) : student.academic_remedial_plan?.status === 'COMPLETED' ? (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/50 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
-                    <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">Plan Completed</span>
-                  </div>
-                ) : assignedPlan ? (
-                  <div className="bg-emerald-950/50 border border-emerald-500/40 p-2 rounded-lg flex flex-col gap-1">
-                    <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
-                      <Check size={13} className="text-emerald-400 shrink-0" />
-                      <span className="line-clamp-1">Assigned: {planTitle}</span>
-                    </div>
-                  </div>
-                ) : isPureAcademic || evaluationAnalysis.showAcademicPlanBtn ? (
+                );
+              }
+              if (hasAcademicRisk) {
+                return (
                   <button
                     type="button"
                     onClick={handleAcademicPlanClick}
-                    className="h-8 w-full px-3 bg-amber-900/30 text-amber-200 border border-amber-500/40 hover:bg-amber-800/40 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-sm"
+                    className="h-8 w-full px-2 bg-amber-900/40 hover:bg-amber-800/50 text-amber-200 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Assign Academic Support Plan"
                   >
                     <BookOpen size={13} className="text-amber-300 shrink-0" />
-                    <span>Academic Plan</span>
+                    <span>Assign Academic Plan</span>
                   </button>
-                ) : (
-                  <span className="text-xs text-slate-400 italic">Standard Monitoring</span>
-                )}
-                <div className="text-[10px] text-amber-300/80 font-medium">Pure Academic Track</div>
-              </div>
-            )}
+                );
+              }
+              return null;
+            })()}
 
+            {/* 2. Financial Relief Request Module */}
+            {(() => {
+              const hasFinancialNeed = evaluationAnalysis.showFinancialAidOption;
+              const reliefStatus = (
+                student.financial_relief_status ||
+                (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')
+              ).toUpperCase();
+
+              if (reliefStatus === 'DISBURSED') {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/60 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">$ Disbursed</span>
+                  </div>
+                );
+              }
+              if (reliefStatus === 'APPROVED') {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/60 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">$ Relief Approved</span>
+                  </div>
+                );
+              }
+              if (reliefStatus === 'DOCUMENTS_REQUIRED') {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
+                    <Clock size={13} className="text-amber-400 shrink-0" />
+                    <span className="truncate">$ Documents Requested</span>
+                  </div>
+                );
+              }
+              if (reliefStatus === 'REQUESTED') {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
+                    <Clock size={13} className="text-amber-400 shrink-0" />
+                    <span className="truncate">$ Pending Aid</span>
+                  </div>
+                );
+              }
+              if (hasFinancialNeed) {
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onGrantFinancialAid && onGrantFinancialAid(student)}
+                    className="h-8 w-full px-2.5 bg-emerald-900/40 hover:bg-emerald-800/50 text-emerald-200 border border-emerald-500/50 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Request Institutional Emergency College Fund"
+                  >
+                    <DollarSign size={13} className="text-emerald-300 shrink-0" />
+                    <span>$ Request College Fund</span>
+                  </button>
+                );
+              }
+              return null;
+            })()}
+
+            {/* 3. Counselor Assignment Module */}
+            {(() => {
+              const hasCounselorNeed = Boolean(
+                evaluationAnalysis.showCounselorBtn ||
+                categoryLower.includes('wellness') ||
+                categoryLower.includes('mental') ||
+                categoryLower.includes('personal') ||
+                categoryLower.includes('dual')
+              );
+
+              if (assignedCounselor) {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full font-semibold">
+                    <UserCheck size={12} className="text-purple-400 shrink-0" />
+                    <span className="truncate">Counselor Assigned</span>
+                  </div>
+                );
+              }
+              if (hasCounselorNeed) {
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onAssignCounselor && onAssignCounselor(student)}
+                    className="h-8 w-full px-2.5 bg-purple-900/40 hover:bg-purple-800/50 text-purple-200 border border-purple-500/50 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Assign Faculty Counselor"
+                  >
+                    <UserCheck size={13} className="text-purple-300 shrink-0" />
+                    <span>Assign Counselor</span>
+                  </button>
+                );
+              }
+              return null;
+            })()}
+
+            {/* 4. Fallback if no specific interventions apply */}
+            {(() => {
+              const hasAcademicRisk =
+                (cgpaVal !== null && Number(cgpaVal) < 6.0) ||
+                (attendanceVal !== null && Number(attendanceVal) < 75) ||
+                evaluationAnalysis.hasLowAcademicMetrics;
+              const acadPlan = student.academic_remedial_plan;
+              const acadPlanStatus = (acadPlan?.status || (assignedPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
+              const hasFinancialNeed = evaluationAnalysis.showFinancialAidOption;
+              const reliefStatus = (
+                student.financial_relief_status ||
+                (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')
+              ).toUpperCase();
+              const hasCounselorNeed = Boolean(
+                evaluationAnalysis.showCounselorBtn ||
+                categoryLower.includes('wellness') ||
+                categoryLower.includes('mental') ||
+                categoryLower.includes('personal') ||
+                categoryLower.includes('dual')
+              );
+
+              if (
+                !hasAcademicRisk &&
+                acadPlanStatus === 'NOT_REQUIRED' &&
+                !hasFinancialNeed &&
+                reliefStatus === 'NONE' &&
+                !assignedCounselor &&
+                !hasCounselorNeed
+              ) {
+                return <span className="text-xs text-slate-400 italic">Standard Monitoring</span>;
+              }
+              return null;
+            })()}
           </div>
         ) : (
           <span className="text-xs text-slate-500 italic">Awaiting AI Evaluation</span>

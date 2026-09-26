@@ -187,11 +187,11 @@ export default function StudentDashboard() {
     ? 'Low Risk'
     : rawRisk;
 
+  const student = profile;
   const hasCounselor = Boolean(
-    profile.assignedCounselorName ||
-    profile.counselorName ||
-    profile.assigned_counselor_id ||
-    profile.counseling_session
+    student?.assigned_counselor_id &&
+    student.assigned_counselor_id !== 'null' &&
+    student.assigned_counselor_id !== 'undefined'
   );
   const hasAcademicPlan = Boolean(
     profile.academic_remedial_plan &&
@@ -242,7 +242,7 @@ export default function StudentDashboard() {
         )}
 
         {/* Counseling Session Scheduled Notification Banner */}
-        {profile.counseling_session?.status === 'SCHEDULED' && (
+        {hasCounselor && profile.counseling_session?.status === 'SCHEDULED' && (
           <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-slate-900 border-2 border-purple-500/60 rounded-xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in fade-in">
             <div className="flex items-start gap-3.5">
               <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 shrink-0 mt-0.5">

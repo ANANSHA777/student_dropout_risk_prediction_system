@@ -574,8 +574,8 @@ export function StudentDetailsModal({
                     </div>
                   </div>
 
-                  {/* Counselor Assignment Trigger (Hidden for Admin) */}
-                  {!isAdmin && (
+                  {/* Counselor Assignment Trigger (Hidden for Admin & Counselor) */}
+                  {!isAdmin && !isCounselor && (
                     <button
                       type="button"
                       onClick={() => onOpenCounselorModal && onOpenCounselorModal(student)}
@@ -728,19 +728,15 @@ export function StudentDetailsModal({
                       ? 'bg-blue-950/80 text-blue-300 border-blue-500/40'
                       : isScheduled
                       ? 'bg-indigo-950/80 text-indigo-300 border-indigo-500/40'
-                      : isPending
-                      ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
-                      : 'bg-slate-800 text-slate-400 border-slate-700';
+                      : 'bg-amber-950/80 text-amber-300 border-amber-500/40';
 
                     const statusText = isCompleted
-                      ? 'Session Completed & Resolved'
+                      ? 'COMPLETED'
                       : isConfirmed
-                      ? 'Attendance Confirmed'
+                      ? 'Student Confirmed'
                       : isScheduled
-                      ? 'Session Scheduled'
-                      : isPending
-                      ? 'Assigned • Pending Schedule'
-                      : 'No Counselor Assigned';
+                      ? 'Scheduled'
+                      : 'Pending Schedule';
 
                     const displayCounselorNotes = isAdmin
                       ? '[Confidential Counselor Clinical Note — Masked for Privacy]'
@@ -798,9 +794,9 @@ export function StudentDetailsModal({
                       : 'bg-slate-800 text-slate-400 border-slate-700';
 
                     const planStatusText = isPlanCompleted
-                      ? 'Plan Resolved & Completed'
+                      ? 'COMPLETED'
                       : isPlanInProgress
-                      ? 'Remedial Plan In Progress'
+                      ? 'In Progress'
                       : 'Not Required';
 
                     return (
@@ -1464,8 +1460,8 @@ export function StudentDetailsModal({
         </div>
 
         {/* Footer */}
-        <div className={`p-4 border-t border-slate-800 bg-[#080c14] flex items-center ${isAdmin ? 'justify-end' : 'justify-between'}`}>
-          {!isAdmin && (
+        <div className={`p-4 border-t border-slate-800 bg-[#080c14] flex items-center ${(isAdmin || isCounselor) ? 'justify-end' : 'justify-between'}`}>
+          {!isAdmin && !isCounselor && (
             <button
               type="button"
               onClick={() => onEvaluateRisk && onEvaluateRisk(studentId)}

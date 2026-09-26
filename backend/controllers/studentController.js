@@ -172,15 +172,17 @@ exports.getStudentProfile = async (req, res) => {
         evaluationCase: profile.evaluationCase || 'NONE',
         assignedCounselorName: counselorName,
         counselorName: counselorName,
-        assigned_counselor_id: counselorId,
-        assignedCounselor: counselorId,
-        counselingStatus: profile.counselingStatus || 'Active Review',
-        counseling_session: profile.counseling_session || {
-          status: 'PENDING_SCHEDULE',
-          date: null,
-          time: '',
-          notes: '',
-        },
+        assigned_counselor_id: counselorId || null,
+        assignedCounselor: counselorId || null,
+        counselingStatus: counselorId ? (profile.counselingStatus || 'Active Review') : null,
+        counseling_session: counselorId
+          ? (profile.counseling_session || {
+              status: 'PENDING_SCHEDULE',
+              date: null,
+              time: '',
+              notes: '',
+            })
+          : null,
         academic_remedial_plan: profile.academic_remedial_plan || {
           status: profile.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED',
           plan_title: profile.assignedAcademicPlan || '',
@@ -482,18 +484,30 @@ exports.uploadFinancialDocument = async (req, res) => {
     const profile = await StudentProfile.findOneAndUpdate(
       { user: studentId },
       {
+        $set: {
+          financial_relief_status: 'DOCUMENTS_SUBMITTED',
+          financialAidStatus: 'DOCUMENTS_SUBMITTED',
+        },
         $push: {
           financial_documents: newDoc,
           intervention_logs: {
             action: 'Proof Document Uploaded',
             performed_by: req.user?.name || 'Student',
             timestamp: new Date(),
-            notes: `Student uploaded verification proof document: "${filename}".`,
+            notes: `Student uploaded verification proof document: "${filename}". Transitioned to DOCUMENTS_SUBMITTED for administrative verification.`,
           },
         },
       },
       { new: true, upsert: true }
     );
+
+    // Sync User record
+    await User.findByIdAndUpdate(studentId, {
+      $set: {
+        financial_relief_status: 'DOCUMENTS_SUBMITTED',
+        financialAidStatus: 'DOCUMENTS_SUBMITTED',
+      },
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

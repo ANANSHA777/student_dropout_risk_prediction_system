@@ -108,11 +108,9 @@ exports.getCounselorCases = async (req, res) => {
         };
       })
       .filter((student) => {
-        if (student.isDirectlyAssigned) return true;
-        const r = String(student.riskLevel || '').toLowerCase();
-        const isHighOrMedium = r.includes('high') || r.includes('medium');
-        const isCaseA = student.evaluationCase === 'CASE_A_WELLNESS_DISENGAGEMENT';
-        return isHighOrMedium || isCaseA;
+        // Strictly filter: assigned_counselor_id == currentUser.id
+        // Students with assigned_counselor_id == null MUST NOT appear in counselor caseload
+        return Boolean(student.isDirectlyAssigned);
       });
 
     res.status(200).json({

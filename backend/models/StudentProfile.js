@@ -178,7 +178,24 @@ const studentProfileSchema = new mongoose.Schema(
     },
     financialAidStatus: {
       type: String,
-      enum: ['Paid', 'Pending', 'Required', 'Granted', 'Emergency Assistance Requested', 'Approved', 'Not Applied', 'Pending Institutional Support'],
+      enum: [
+        'Paid',
+        'Pending',
+        'Required',
+        'Granted',
+        'Emergency Assistance Requested',
+        'Approved',
+        'APPROVED',
+        'Not Applied',
+        'Pending Institutional Support',
+        'Disbursed',
+        'DISBURSED',
+        'DOCUMENTS_REQUIRED',
+        'DOCUMENTS_SUBMITTED',
+        'REQUESTED',
+        'REJECTED',
+        'Rejected',
+      ],
       default: 'Paid',
     },
     financialAidGrant: {
@@ -189,7 +206,7 @@ const studentProfileSchema = new mongoose.Schema(
     collegeFinancialAid: {
       status: { 
         type: String, 
-        enum: ['Not Applied', 'Pending Review', 'Approved', 'Rejected', 'Pending Institutional Support'], 
+        enum: ['Not Applied', 'Pending Review', 'Approved', 'Rejected', 'Pending Institutional Support', 'Disbursed', 'DISBURSED'], 
         default: 'Not Applied' 
       },
       grantAmount: { type: Number, default: 0 },
@@ -222,7 +239,7 @@ const studentProfileSchema = new mongoose.Schema(
     // --- FINANCIAL RELIEF STATUS (STRICT SPEC) ---
     financial_relief_status: {
       type: String,
-      enum: ['NONE', 'REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED'],
+      enum: ['NONE', 'REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED', 'REJECTED'],
       default: 'NONE',
     },
 

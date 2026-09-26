@@ -75,7 +75,18 @@ export default function CounselorDashboard() {
     setError(null);
     try {
       const data = await fetchCounselorCases();
-      setCases(Array.isArray(data) ? data : data.cases || []);
+      const rawCases = Array.isArray(data) ? data : data.cases || [];
+      const currentUserId = user?._id || user?.id;
+      // Strictly filter cases assigned to current counselor (exclude unassigned students)
+      const assignedCases = rawCases.filter((c) => {
+        const assignedId = (c.assigned_counselor_id || c.assignedCounselor)?.toString();
+        if (!assignedId) return false;
+        if (currentUserId) {
+          return assignedId === currentUserId.toString();
+        }
+        return true;
+      });
+      setCases(assignedCases);
     } catch (err) {
       console.error('Failed to load counselor cases:', err);
       setError(err.message || 'Failed to fetch counselor caseload');
