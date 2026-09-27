@@ -17,6 +17,10 @@ import {
   UploadCloud,
   FileText,
   Loader2,
+  Target,
+  CheckSquare,
+  Square,
+  Sparkles,
 } from 'lucide-react';
 import { changePassword } from '../services/authService';
 import { uploadFinancialDocument, confirmCounselingSession } from '../services/studentService';
@@ -39,6 +43,40 @@ export default function StudentDashboard() {
   // Counseling Session Confirmation State
   const [confirmingSession, setConfirmingSession] = useState(false);
   const [sessionFeedback, setSessionFeedback] = useState(null);
+
+  // Remedial Checklist State (Stored persistently in localStorage)
+  const [remedialTasks, setRemedialTasks] = useState([
+    { id: 'assignments', title: 'Complete Remedial Subject Assignments', completed: false },
+    { id: 'classes', title: 'Attend Mandatory Support Classes', completed: false },
+    { id: 'quiz', title: 'Pass Progress Evaluation Quiz', completed: false },
+  ]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const studentDbId = profile._id || profile.id || profile.studentId || profile.user;
+    if (!studentDbId) return;
+    try {
+      const saved = localStorage.getItem(`remedial_tasks_${studentDbId}`);
+      if (saved) {
+        setRemedialTasks(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn('Error loading remedial tasks from localStorage:', e);
+    }
+  }, [profile]);
+
+  const handleToggleTask = (taskId) => {
+    const studentDbId = profile?._id || profile?.id || profile?.studentId || profile?.user || 'default';
+    setRemedialTasks((prev) => {
+      const updated = prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t));
+      try {
+        localStorage.setItem(`remedial_tasks_${studentDbId}`, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Error saving remedial tasks:', e);
+      }
+      return updated;
+    });
+  };
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -195,8 +233,11 @@ export default function StudentDashboard() {
   );
   const hasAcademicPlan = Boolean(
     profile.academic_remedial_plan &&
-    (profile.academic_remedial_plan.status === 'IN_PROGRESS' || profile.academic_remedial_plan.status === 'COMPLETED')
+    (profile.academic_remedial_plan.status === 'IN_PROGRESS' || profile.academic_remedial_plan.status === 'COMPLETED' || Boolean(profile.academic_remedial_plan.plan_title))
   );
+  const completedTaskCount = remedialTasks.filter((t) => t.completed).length;
+  const taskProgressPercent = Math.round((completedTaskCount / remedialTasks.length) * 100);
+  const isReadyForVerification = completedTaskCount === remedialTasks.length && profile.academic_remedial_plan?.status !== 'COMPLETED';
   const hasFinancialRelief = (profile.financial_relief_status && profile.financial_relief_status !== 'NONE') ||
     (profile.financialAidStatus === 'Pending Institutional Support');
   const hasInterventions = Array.isArray(profile.intervention_logs) && profile.intervention_logs.length > 0;
@@ -426,50 +467,150 @@ export default function StudentDashboard() {
 
               {/* Active Academic Remedial Plan Card */}
               {hasAcademicPlan && (
-                <div className="bg-slate-950 p-4 rounded-lg border border-amber-500/40 flex items-start gap-3">
-                  <GraduationCap className="text-amber-400 mt-0.5 shrink-0" size={22} />
-                  <div className="flex-1 space-y-1.5">
+                <div className="bg-slate-950 p-5 rounded-xl border border-amber-500/40 flex items-start gap-3.5 shadow-xl">
+                  <GraduationCap className="text-amber-400 mt-1 shrink-0" size={24} />
+                  <div className="flex-1 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                        Academic Remedial Plan
+                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>Academic Remedial Plan</span>
                       </div>
                       <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold border ${
                         profile.academic_remedial_plan.status === 'COMPLETED'
                           ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                          : isReadyForVerification
+                          ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 animate-pulse'
                           : 'bg-amber-950/60 text-amber-300 border-amber-500/40 animate-pulse'
                       }`}>
-                        {profile.academic_remedial_plan.status === 'COMPLETED' ? 'Completed' : 'In Progress'}
+                        {profile.academic_remedial_plan.status === 'COMPLETED'
+                          ? 'Completed'
+                          : isReadyForVerification
+                          ? 'In Progress • Ready for Verification'
+                          : 'In Progress'}
                       </span>
                     </div>
 
-                    <div className="text-base font-bold text-white">
-                      {profile.academic_remedial_plan.plan_title || 'Academic Support Plan'}
-                    </div>
+                    <div>
+                      <div className="text-base font-bold text-white">
+                        {profile.academic_remedial_plan.plan_title || 'Academic Support Plan'}
+                      </div>
 
-                    <div className="text-xs text-slate-400">
-                      Assigned by: <span className="text-slate-200 font-medium">{profile.academic_remedial_plan.assigned_by_teacher_name || 'Faculty Mentor'}</span>
-                      {profile.academic_remedial_plan.assigned_at && (
-                        <span> • {new Date(profile.academic_remedial_plan.assigned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                      )}
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        Assigned by: <span className="text-slate-200 font-medium">{profile.academic_remedial_plan.assigned_by_teacher_name || 'Faculty Mentor'}</span>
+                        {profile.academic_remedial_plan.assigned_at && (
+                          <span> • {new Date(profile.academic_remedial_plan.assigned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        )}
+                      </div>
                     </div>
 
                     {profile.academic_remedial_plan.plan_details && (
-                      <p className="text-xs text-slate-300 leading-relaxed">
+                      <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800">
                         {profile.academic_remedial_plan.plan_details}
                       </p>
                     )}
 
-                    {profile.academic_remedial_plan.target_metrics && (
-                      <div className="bg-slate-900/80 p-2.5 rounded border border-slate-800 text-xs text-amber-300">
-                        <span className="text-slate-400 font-semibold">Target Metrics: </span>
-                        {profile.academic_remedial_plan.target_metrics}
+                    {/* Milestone Goals Display */}
+                    <div className="bg-slate-900/80 border border-amber-500/30 rounded-lg p-3.5 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
+                        <Target size={14} className="text-amber-400 shrink-0" />
+                        <span>Target Milestone Goals</span>
                       </div>
-                    )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div className="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <div className="text-[11px] text-slate-400">Target CGPA</div>
+                            <div className="text-sm font-bold text-emerald-400 mt-0.5">≥ 6.0</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[11px] text-slate-500">Current CGPA</div>
+                            <div className={`text-sm font-bold ${Number(profile.cgpa) < 6.0 ? 'text-amber-400' : 'text-slate-200'}`}>
+                              {profile.cgpa !== null && profile.cgpa !== undefined ? profile.cgpa : 'N/A'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <div className="text-[11px] text-slate-400">Target Attendance</div>
+                            <div className="text-sm font-bold text-emerald-400 mt-0.5">≥ 75%</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[11px] text-slate-500">Current Attendance</div>
+                            <div className={`text-sm font-bold ${Number(profile.attendancePercentage ?? profile.attendance ?? 0) < 75 ? 'text-amber-400' : 'text-slate-200'}`}>
+                              {profile.attendancePercentage ?? profile.attendance ?? 0}%
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {profile.academic_remedial_plan.target_metrics && (
+                        <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
+                          <span className="font-semibold text-slate-300">Target Directives: </span>
+                          {profile.academic_remedial_plan.target_metrics}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Remedial Task Checklist & Interactive Progress Tracker */}
+                    <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3.5 space-y-3">
+                      <div className="flex items-center justify-between text-xs flex-wrap gap-2">
+                        <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                          <CheckCircle2 size={14} className="text-indigo-400" />
+                          Remedial Task Checklist
+                        </span>
+                        <span className="text-[11px] font-bold text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-500/30">
+                          {completedTaskCount} / {remedialTasks.length} Completed ({taskProgressPercent}%)
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                        <div
+                          className={`h-full transition-all duration-500 rounded-full ${
+                            taskProgressPercent === 100
+                              ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                              : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                          }`}
+                          style={{ width: `${taskProgressPercent}%` }}
+                        />
+                      </div>
+
+                      {/* Checklist Items */}
+                      <div className="space-y-2 pt-1">
+                        {remedialTasks.map((task) => (
+                          <div
+                            key={task.id}
+                            onClick={() => handleToggleTask(task.id)}
+                            className={`flex items-center gap-2.5 p-2 rounded-lg text-xs cursor-pointer border transition select-none ${
+                              task.completed
+                                ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
+                                : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {task.completed ? (
+                              <CheckSquare size={16} className="text-emerald-400 shrink-0" />
+                            ) : (
+                              <Square size={16} className="text-slate-500 shrink-0" />
+                            )}
+                            <span className={task.completed ? 'line-through text-slate-400' : 'text-slate-200 font-medium'}>
+                              {task.title}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Status Prompt when all 3 checked */}
+                      {isReadyForVerification && (
+                        <div className="p-2.5 bg-emerald-950/50 border border-emerald-500/40 rounded text-xs text-emerald-300 flex items-center gap-2 animate-in fade-in">
+                          <Sparkles size={14} className="text-emerald-400 shrink-0" />
+                          <span>
+                            All remedial tasks checked! Status updated to <strong>Ready for Verification</strong>. Awaiting mentor sign-off.
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
                     {profile.academic_remedial_plan.status === 'COMPLETED' && (
-                      <div className="bg-emerald-950/40 p-2.5 rounded border border-emerald-800/40 text-xs space-y-0.5">
+                      <div className="bg-emerald-950/40 p-3 rounded-lg border border-emerald-800/40 text-xs space-y-1">
                         <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
-                          <CheckCircle2 size={12} /> Plan Completed
+                          <CheckCircle2 size={13} /> Academic Plan Completed & Verified
                         </span>
                         {profile.academic_remedial_plan.completion_notes && (
                           <p className="text-emerald-200/90 italic text-[11px]">

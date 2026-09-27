@@ -240,12 +240,145 @@ export default function CounselorDashboard() {
     }
   };
 
+  // Dynamic Real-Time Risk Tier Resolver (Synchronized with DB evaluation & Case Invariant)
+  const resolveCaseloadRiskTier = (item) => {
+    if (!item) return { label: 'Unevaluated', badgeText: 'Unevaluated', isHigh: false, isMedium: false, isLow: false, isDual: false, colorClass: 'bg-slate-800 text-slate-400 border-slate-700' };
+
+    // 1. Get raw evaluated risk level and categories from DB
+    const rawRisk = (item.overall_risk_level || item.evaluation_status || item.riskLevel || '').trim();
+    const primaryCat = (item.primaryRiskCategory || item.riskCategory || '').trim();
+    const rawConcern = (item.concern || item.riskCategory || '').trim();
+
+    // 2. Check active non-wellness risk factors
+    const cgpa = item.cgpa !== null && item.cgpa !== undefined ? Number(item.cgpa) : null;
+    const attendance = item.attendancePercentage ?? item.attendance ?? null;
+    const backlogs = String(item.activeBacklogs || '').toLowerCase();
+    const hasBacklogs = backlogs && !backlogs.includes('0') && !backlogs.includes('none') && !backlogs.includes('no');
+
+    const hasAcademicRisk =
+      (cgpa !== null && cgpa < 6.0) ||
+      (attendance !== null && Number(attendance) < 75) ||
+      hasBacklogs ||
+      (item.academic_remedial_plan?.status === 'IN_PROGRESS');
+
+    const fStatus = (item.financial_relief_status || '').toUpperCase();
+    const fStress = String(item.financialStress || item.moneyFeeWorries || '').toLowerCase();
+    const hasFinancialRisk =
+      fStatus === 'REQUESTED' ||
+      fStatus === 'DOCUMENTS_REQUIRED' ||
+      fStatus === 'DOCUMENTS_SUBMITTED' ||
+      fStatus === 'PENDING INSTITUTIONAL SUPPORT' ||
+      ['high', 'severe', 'critical'].some((w) => fStress.includes(w));
+
+    const sessionStatus = (item.counseling_session?.status || '').toUpperCase();
+    const caseStatus = (item.caseStatus || item.counselingStatus || '').toUpperCase();
+    const isWellnessResolved = sessionStatus === 'COMPLETED' || caseStatus === 'RESOLVED';
+
+    // 3. Determine if Dual Risk
+    const isDual =
+      primaryCat.toLowerCase().includes('dual') ||
+      rawRisk.toLowerCase().includes('dual') ||
+      rawConcern.toLowerCase().includes('dual') ||
+      (hasAcademicRisk && hasFinancialRisk);
+
+    // Case Invariant: Even if a student's personal wellness session status is marked Completed / Resolved,
+    // their evaluated risk badge should accurately state High Risk or Dual Risk if other risk factors (like financial or academic) remain active.
+    if (isWellnessResolved && (hasAcademicRisk || hasFinancialRisk)) {
+      if (isDual || (hasAcademicRisk && hasFinancialRisk)) {
+        return {
+          label: 'Dual Risk',
+          badgeText: 'Dual Risk',
+          isHigh: true,
+          isMedium: false,
+          isLow: false,
+          isDual: true,
+          colorClass: 'bg-red-950/60 text-red-400 border-red-500/40',
+        };
+      }
+      return {
+        label: 'High Risk',
+        badgeText: 'High Risk',
+        isHigh: true,
+        isMedium: false,
+        isLow: false,
+        isDual: false,
+        colorClass: 'bg-red-950/60 text-red-400 border-red-500/40',
+      };
+    }
+
+    // If evaluated as Dual Risk
+    if (isDual) {
+      return {
+        label: 'Dual Risk',
+        badgeText: 'Dual Risk',
+        isHigh: true,
+        isMedium: false,
+        isLow: false,
+        isDual: true,
+        colorClass: 'bg-red-950/60 text-red-400 border-red-500/40',
+      };
+    }
+
+    // If evaluated as High Risk
+    if (rawRisk.toLowerCase().includes('high')) {
+      return {
+        label: 'High Risk',
+        badgeText: 'High Risk',
+        isHigh: true,
+        isMedium: false,
+        isLow: false,
+        isDual: false,
+        colorClass: 'bg-red-950/60 text-red-400 border-red-500/40',
+      };
+    }
+
+    // If evaluated as Medium Risk or has single active risk
+    if (rawRisk.toLowerCase().includes('medium') || hasAcademicRisk || hasFinancialRisk) {
+      return {
+        label: 'Medium Risk',
+        badgeText: 'Medium Risk',
+        isHigh: false,
+        isMedium: true,
+        isLow: false,
+        isDual: false,
+        colorClass: 'bg-amber-950/60 text-amber-400 border-amber-500/40',
+      };
+    }
+
+    // If evaluated as Low Risk and no active risks
+    if (rawRisk.toLowerCase().includes('low')) {
+      return {
+        label: 'Low Risk',
+        badgeText: 'Low Risk',
+        isHigh: false,
+        isMedium: false,
+        isLow: true,
+        isDual: false,
+        colorClass: 'bg-emerald-950/60 text-emerald-400 border-emerald-500/40',
+      };
+    }
+
+    // Default: Unevaluated / Raw
+    const isEvaluated = Boolean(item.riskEvaluated || (rawRisk && !rawRisk.toLowerCase().includes('unevaluated')));
+    const displayLabel = isEvaluated ? (rawRisk.includes('Risk') ? rawRisk : `${rawRisk} Risk`) : 'Unevaluated';
+
+    return {
+      label: displayLabel,
+      badgeText: displayLabel,
+      isHigh: false,
+      isMedium: false,
+      isLow: false,
+      isDual: false,
+      colorClass: 'bg-slate-800 text-slate-400 border-slate-700',
+    };
+  };
+
   // Stats Counters
   const activeCasesCount = cases.filter((c) => c.caseStatus !== 'Resolved').length;
   const criticalCount = cases.filter((c) => {
-    const r = String(c.riskLevel || '').toLowerCase();
+    const tier = resolveCaseloadRiskTier(c);
     const st = String(c.status || '').toLowerCase();
-    return r.includes('high') || st.includes('critical') || st.includes('depressed') || st.includes('severe');
+    return tier.isHigh || tier.isDual || st.includes('critical') || st.includes('depressed') || st.includes('severe');
   }).length;
   const resolvedCount = cases.filter((c) => c.caseStatus === 'Resolved').length;
 
@@ -383,10 +516,9 @@ export default function CounselorDashboard() {
                 ) : (
                   cases.map((item) => {
                     const studentId = item._id || item.id;
-                    const isHigh = String(item.riskLevel || '').toLowerCase().includes('high');
-                    const isMedium = String(item.riskLevel || '').toLowerCase().includes('medium');
                     const session = item.counseling_session;
                     const sessionStatus = session?.status || 'PENDING_SCHEDULE';
+                    const riskTier = resolveCaseloadRiskTier(item);
 
                     return (
                       <tr key={studentId} className="hover:bg-slate-800/30 transition">
@@ -402,15 +534,9 @@ export default function CounselorDashboard() {
                         {/* Risk Tier */}
                         <td className="p-3.5">
                           <span
-                            className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                              isHigh
-                                ? 'bg-red-950/60 text-red-400 border-red-500/40'
-                                : isMedium
-                                ? 'bg-amber-950/60 text-amber-400 border-amber-500/40'
-                                : 'bg-emerald-950/60 text-emerald-400 border-emerald-500/40'
-                            }`}
+                            className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${riskTier.colorClass}`}
                           >
-                            {item.riskLevel || 'Unevaluated'}
+                            {riskTier.badgeText}
                           </span>
                         </td>
 

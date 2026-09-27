@@ -301,13 +301,14 @@ const sanitizeReliefStatus = (val) => {
   const s = String(val).trim().toUpperCase().replace(/[\s-]+/g, '_');
   if (s === 'DISBURSED' || s === 'DISBURSE' || s.includes('DISBURSE')) return 'DISBURSED';
   if (s === 'APPROVED' || s === 'APPROVE' || s === 'APPROVE_FUND' || s === 'APPROVE_FUNDS') return 'APPROVED';
-  if (s === 'DOCUMENTS_REQUIRED' || s === 'DOCS_REQUIRED' || s.includes('DOCUMENT')) return 'DOCUMENTS_REQUIRED';
+  if (s === 'DOCUMENTS_SUBMITTED' || s === 'DOCS_SUBMITTED' || s.includes('SUBMIT')) return 'DOCUMENTS_SUBMITTED';
+  if (s === 'DOCUMENTS_REQUIRED' || s === 'DOCS_REQUIRED' || s.includes('REQUIRE') || s.includes('DOCUMENT')) return 'DOCUMENTS_REQUIRED';
   if (s === 'REJECTED' || s === 'REJECT' || s.includes('REJECT')) return 'REJECTED';
   if (s === 'REQUESTED' || s === 'REQUEST' || s.includes('REQUEST')) return 'REQUESTED';
   return s;
 };
 
-// @desc    Update student financial relief status (DOCUMENTS_REQUIRED, APPROVED, DISBURSED, REJECTED)
+// @desc    Update student financial relief status (DOCUMENTS_REQUIRED, DOCUMENTS_SUBMITTED, APPROVED, DISBURSED, REJECTED)
 // @route   POST /api/admin/financial-relief/update-status
 // @access  Private/Admin
 const updateFinancialReliefStatus = async (req, res) => {
@@ -322,7 +323,7 @@ const updateFinancialReliefStatus = async (req, res) => {
     }
 
     const sanitizedStatus = sanitizeReliefStatus(status);
-    const validStatuses = ['DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED', 'REQUESTED'];
+    const validStatuses = ['DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED', 'REJECTED', 'REQUESTED'];
     if (!validStatuses.includes(sanitizedStatus)) {
       return res.status(400).json({
         success: false,
@@ -360,6 +361,10 @@ const updateFinancialReliefStatus = async (req, res) => {
       profile.financialAidStatus = 'DOCUMENTS_REQUIRED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Pending Review';
+    } else if (sanitizedStatus === 'DOCUMENTS_SUBMITTED') {
+      profile.financialAidStatus = 'DOCUMENTS_SUBMITTED';
+      if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
+      profile.collegeFinancialAid.status = 'Pending Review';
     } else if (sanitizedStatus === 'REQUESTED') {
       profile.financialAidStatus = 'REQUESTED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
@@ -376,6 +381,8 @@ const updateFinancialReliefStatus = async (req, res) => {
         ? 'College Fund Rejected by Admin'
         : sanitizedStatus === 'DOCUMENTS_REQUIRED'
         ? 'Financial Relief: Documents Required'
+        : sanitizedStatus === 'DOCUMENTS_SUBMITTED'
+        ? 'Financial Relief: Documents Submitted'
         : 'Financial Relief: Requested';
 
     const defaultNotes =
@@ -387,6 +394,8 @@ const updateFinancialReliefStatus = async (req, res) => {
         ? 'Emergency relief application rejected following review.'
         : sanitizedStatus === 'DOCUMENTS_REQUIRED'
         ? 'Administration requested verification proof documents.'
+        : sanitizedStatus === 'DOCUMENTS_SUBMITTED'
+        ? 'Student submitted verification documents for review.'
         : 'Emergency College Relief Fund requested.';
 
     profile.intervention_logs.push({

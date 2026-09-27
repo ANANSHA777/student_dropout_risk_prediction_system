@@ -64,6 +64,47 @@ exports.getCounselorCases = async (req, res) => {
           ? 'Wellness & Mental Health'
           : 'Personal / Wellness';
 
+        // Check active risk factors to ensure accurate real-time evaluated risk tier
+        const cgpaVal = profile.cgpa ?? user.cgpa ?? null;
+        const attendanceVal = profile.attendancePercentage ?? user.attendance ?? null;
+        const backlogsStr = String(profile.activeBacklogs || '').toLowerCase();
+        const hasBacklogs = backlogsStr && !backlogsStr.includes('0') && !backlogsStr.includes('none') && !backlogsStr.includes('no');
+
+        const hasAcademicRisk =
+          (cgpaVal !== null && Number(cgpaVal) < 6.0) ||
+          (attendanceVal !== null && Number(attendanceVal) < 75) ||
+          hasBacklogs ||
+          (profile.academic_remedial_plan?.status === 'IN_PROGRESS');
+
+        const fStatus = (profile.financial_relief_status || profile.collegeFinancialAid?.status || '').toUpperCase();
+        const fStress = String(profile.financialStress || profile.moneyFeeWorries || '').toLowerCase();
+        const hasFinancialRisk =
+          fStatus === 'REQUESTED' ||
+          fStatus === 'DOCUMENTS_REQUIRED' ||
+          fStatus === 'DOCUMENTS_SUBMITTED' ||
+          fStatus === 'PENDING INSTITUTIONAL SUPPORT' ||
+          ['high', 'severe', 'critical'].some((w) => fStress.includes(w));
+
+        const rawPrimary = (profile.primaryRiskCategory || profile.riskCategory || '').trim();
+        const isDual =
+          rawPrimary.toLowerCase().includes('dual') ||
+          rawRisk.toLowerCase().includes('dual') ||
+          (hasAcademicRisk && hasFinancialRisk);
+
+        let overallRiskLevel = rawRisk;
+        if (isDual) {
+          overallRiskLevel = 'Dual Risk';
+        } else if (hasAcademicRisk && hasFinancialRisk) {
+          overallRiskLevel = 'Dual Risk';
+        } else if (rawRisk.toLowerCase().includes('high')) {
+          overallRiskLevel = 'High Risk';
+        } else if (hasAcademicRisk || hasFinancialRisk) {
+          overallRiskLevel = rawRisk.toLowerCase().includes('medium') ? 'Medium Risk' : 'High Risk';
+        }
+
+        const isEvaluated = Boolean(profile.riskEvaluated || (rawRisk && !rawRisk.toLowerCase().includes('unevaluated')));
+        const evaluationStatus = isEvaluated ? overallRiskLevel : 'Unevaluated';
+
         return {
           _id: user._id,
           id: user._id,
@@ -72,9 +113,12 @@ exports.getCounselorCases = async (req, res) => {
           studentId: profile.studentId || user.studentId || '',
           department: profile.department || user.department || 'Computer Science',
           yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
-          riskLevel: rawRisk,
+          riskLevel: overallRiskLevel,
+          overall_risk_level: overallRiskLevel,
+          evaluation_status: evaluationStatus,
+          riskEvaluated: isEvaluated,
           riskCategory: primaryConcern,
-          primaryRiskCategory: profile.primaryRiskCategory || 'NONE',
+          primaryRiskCategory: profile.primaryRiskCategory || (isDual ? 'Dual Risk (Academic + Personal)' : 'NONE'),
           concern: primaryConcern,
           status: mentalHealth,
           caseStatus: caseStatus,
@@ -199,7 +243,7 @@ exports.logInterventionNote = async (req, res) => {
           qualitativeNotes: qualitativeNoteEntry,
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     // Also update active session if present
@@ -286,7 +330,7 @@ exports.updateCaseStatus = async (req, res) => {
           },
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     if (CounselingSession) {
@@ -296,15 +340,21 @@ exports.updateCaseStatus = async (req, res) => {
       );
     }
 
-    // Requirement 6: Automated Risk Recovery
-    // When an assigned counselor sets case status to Resolved, check: attendance >= 75% AND CGPA >= 6.0
-    // If met, automatically set global risk status to Low Risk and append auto-recovery log
+    // Case Invariant: Automated Risk Recovery check:
+    // When an assigned counselor sets case status to Resolved,
+    // only transition to Low Risk IF attendance >= 75% AND CGPA >= 6.0 AND academic plan is completed/not required AND financial relief is completed/none!
     if (status === 'Resolved') {
       const studentUser = await User.findById(id);
       const currentAttendance = updatedProfile.attendancePercentage ?? studentUser?.attendance ?? 0;
       const currentCgpa = updatedProfile.cgpa ?? studentUser?.cgpa ?? 0;
+      const isAcademicPlanDone =
+        !updatedProfile.academic_remedial_plan ||
+        updatedProfile.academic_remedial_plan.status === 'COMPLETED' ||
+        updatedProfile.academic_remedial_plan.status === 'NOT_REQUIRED';
+      const fStatus = (updatedProfile.financial_relief_status || '').toUpperCase();
+      const isFinancialDone = fStatus === 'NONE' || fStatus === 'APPROVED' || fStatus === 'DISBURSED';
 
-      if (currentAttendance >= 75 && currentCgpa >= 6.0) {
+      if (currentAttendance >= 75 && currentCgpa >= 6.0 && isAcademicPlanDone && isFinancialDone) {
         const autoRecoveryLog = {
           action: 'System Auto-Recovery: Risk updated to Low Risk',
           performed_by: 'Automated Recovery Engine',
@@ -465,7 +515,7 @@ exports.completeSession = async (req, res) => {
     }
 
     // Automated Risk Recovery check:
-    // If academic plan is also COMPLETED (or NOT_REQUIRED) AND attendance >= 75% AND CGPA >= 6.0:
+    // If academic plan is also COMPLETED (or NOT_REQUIRED) AND financial relief is completed/none AND attendance >= 75% AND CGPA >= 6.0:
     const studentUser = await User.findById(profile.user);
     const currentAttendance = profile.attendancePercentage ?? studentUser?.attendance ?? 0;
     const currentCgpa = profile.cgpa ?? studentUser?.cgpa ?? 0;
@@ -473,8 +523,10 @@ exports.completeSession = async (req, res) => {
       !profile.academic_remedial_plan ||
       profile.academic_remedial_plan.status === 'COMPLETED' ||
       profile.academic_remedial_plan.status === 'NOT_REQUIRED';
+    const fStatus = (profile.financial_relief_status || '').toUpperCase();
+    const isFinancialDone = fStatus === 'NONE' || fStatus === 'APPROVED' || fStatus === 'DISBURSED';
 
-    if (currentAttendance >= 75 && currentCgpa >= 6.0 && isAcademicPlanDone) {
+    if (currentAttendance >= 75 && currentCgpa >= 6.0 && isAcademicPlanDone && isFinancialDone) {
       profile.riskLevel = 'Low Risk';
       profile.riskCategory = 'None';
       profile.primaryRiskCategory = 'NONE';

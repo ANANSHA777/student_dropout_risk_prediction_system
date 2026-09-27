@@ -249,7 +249,7 @@ exports.updateStudentMarks = async (req, res) => {
     const profile = await StudentProfile.findOneAndUpdate(
       { user: user._id },
       updateQuery,
-      { new: true, upsert: true, setDefaultsOnInsert: false }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: false }
     );
 
     // Compute readiness status
@@ -405,7 +405,7 @@ exports.assignCounselorToStudent = async (req, res) => {
           },
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     // Sync to student User document
@@ -500,7 +500,7 @@ exports.applyCollegeFinancialAid = async (req, res) => {
           },
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     // Sync to student User document

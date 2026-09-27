@@ -136,9 +136,18 @@ export function StudentDetailsModal({
   const isHighFinancialStress = ['high', 'severe', 'critical'].some(term => finStressStr.includes(term));
   const isLowIncome = ['below 30', 'below ₹30,000', 'below 30,000', '< 30000', '< 30,000', 'poor', 'poverty', '15,000'].some(term => finIncomeStr.includes(term));
   const isHighIncome = ['above 60', 'above ₹60,000', 'above 60,000', '> 60000', '> 60,000', 'above 1,00,000', 'above 100000'].some(term => finIncomeStr.includes(term));
-  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED'].includes((localReliefStatus || '').toUpperCase());
+  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED'].includes((localReliefStatus || '').toUpperCase());
 
   const isFinanciallyEligible = (isHighFinancialStress || isLowIncome || hasExistingReliefRequest) && !(isHighIncome && !isHighFinancialStress);
+
+  const hasWellnessOrCounselingNeed = Boolean(
+    hasMentalHealthFlag ||
+    hasDisengagementFlag ||
+    ['less than 5', '< 5', 'less than 5 hours'].some(t => String(sleepHours).toLowerCase().includes(t)) ||
+    ['more than 2', '2 hours', 'long', 'high', 'far'].some(t => String(commuteTime).toLowerCase().includes(t)) ||
+    student.assigned_counselor_id ||
+    student.assignedCounselor
+  );
 
   const isPendingInstitutionalSupport =
     localReliefStatus === 'Pending Institutional Support' ||
@@ -348,11 +357,20 @@ export function StudentDetailsModal({
           </button>
 
           <button
-            onClick={() => setActiveTab('actions')}
-            className={`pb-3 px-3 transition-colors flex items-center gap-1.5 border-b-2 cursor-pointer ${
-              activeTab === 'actions'
-                ? 'border-indigo-500 text-indigo-300 font-bold'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+            type="button"
+            disabled={!isFinanciallyEligible && !isAdmin}
+            onClick={() => (isFinanciallyEligible || isAdmin) && setActiveTab('actions')}
+            title={
+              !isFinanciallyEligible && !isAdmin
+                ? 'Disabled: Student has no verified financial risk criteria (requires High Financial Stress or Family Income ≤ ₹30,000)'
+                : 'Emergency Relief & Support Actions'
+            }
+            className={`pb-3 px-3 transition-colors flex items-center gap-1.5 border-b-2 ${
+              !isFinanciallyEligible && !isAdmin
+                ? 'border-transparent text-slate-600 cursor-not-allowed opacity-50'
+                : activeTab === 'actions'
+                ? 'border-indigo-500 text-indigo-300 font-bold cursor-pointer'
+                : 'border-transparent text-slate-400 hover:text-slate-200 cursor-pointer'
             }`}
           >
             <DollarSign size={14} />
@@ -574,8 +592,8 @@ export function StudentDetailsModal({
                     </div>
                   </div>
 
-                  {/* Counselor Assignment Trigger (Hidden for Admin & Counselor) */}
-                  {!isAdmin && !isCounselor && (
+                  {/* Counselor Assignment Trigger (Hidden for Admin, Counselor, and pure academic risk students) */}
+                  {!isAdmin && !isCounselor && hasWellnessOrCounselingNeed && (
                     <button
                       type="button"
                       onClick={() => onOpenCounselorModal && onOpenCounselorModal(student)}
@@ -1037,294 +1055,344 @@ export function StudentDetailsModal({
                 {isAdmin ? (
                   /* ADMIN APPROVAL HUB */
                   <div className="space-y-5">
-                    {isRequestedStatus ? (
-                      /* CASE 1: REQUESTED -> SHOW DETAILS & ADMIN ACTION BUTTONS */
-                      <div className="space-y-4">
-                        {/* Request Details Card */}
-                        <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
-                          <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-                            <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <FileText size={14} className="text-amber-400" />
-                              Pending Faculty Relief Request Details
-                            </h4>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              Submitted: {formatDate(requestedDate)}
-                            </span>
-                          </div>
+                    {(() => {
+                      const hasUploadedDocs = financialDocs.length > 0;
+                      const isDocSubmittedState = normalizedStatus === 'DOCUMENTS_SUBMITTED' || (hasUploadedDocs && (isRequestedStatus || normalizedStatus === 'DOCUMENTS_REQUIRED'));
 
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                              <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
-                              <span className="text-base font-bold text-emerald-400">
-                                ₹{requestedAmountFormatted}
-                              </span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">Emergency College Aid</span>
+                      if (isDocSubmittedState) {
+                        return (
+                          /* CASE 1: DOCUMENTS SUBMITTED -> VERIFY & APPROVE / REJECT */
+                          <div className="space-y-4">
+                            <div className="p-4 bg-blue-950/30 border border-blue-800/50 rounded-xl space-y-2">
+                              <div className="flex items-center gap-2 text-blue-300 text-xs font-bold">
+                                <FileText size={15} />
+                                <span>Verification Documents Submitted for Review</span>
+                              </div>
+                              <p className="text-xs text-blue-200/80">
+                                The student has submitted official proof documents for emergency financial relief. Review uploaded files below and choose to verify & approve disbursement, or reject.
+                              </p>
                             </div>
 
-                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                              <span className="text-slate-500 block text-[11px]">Support Category</span>
-                              <span className="text-sm font-semibold text-white truncate block">
-                                {requestedCategory}
-                              </span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">Institutional Quota</span>
+                            {/* Request Details Card */}
+                            <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                                <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                  <FileText size={14} className="text-amber-400" />
+                                  Emergency Relief Request Details
+                                </h4>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  Submitted: {formatDate(requestedDate)}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
+                                  <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Emergency College Aid</span>
+                                </div>
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Support Category</span>
+                                  <span className="text-sm font-semibold text-white truncate block">{requestedCategory}</span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Institutional Quota</span>
+                                </div>
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Requested By Faculty</span>
+                                  <span className="text-sm font-semibold text-slate-200 truncate block">{requestedBy}</span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Department Advocate</span>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+                                <span className="text-slate-500 block text-[11px] font-semibold mb-1">Faculty Case Justification & Notes:</span>
+                                <p className="text-slate-300 leading-relaxed italic">"{requestedNotes}"</p>
+                              </div>
                             </div>
 
-                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                              <span className="text-slate-500 block text-[11px]">Requested By Faculty</span>
-                              <span className="text-sm font-semibold text-slate-200 truncate block">
-                                {requestedBy}
-                              </span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">Department Advocate</span>
+                            {/* Uploaded Verification Documents */}
+                            <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-2">
+                              <h5 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                                <FileText size={13} className="text-indigo-400" />
+                                Uploaded Proof & Verification Documents ({financialDocs.length})
+                              </h5>
+                              <div className="flex flex-wrap gap-2">
+                                {financialDocs.map((doc, dIdx) => (
+                                  <a
+                                    key={dIdx}
+                                    href={doc.fileData || doc.url || '#'}
+                                    download={doc.filename || `document_${dIdx + 1}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-slate-900/80 px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-indigo-500/50 transition"
+                                  >
+                                    <FileText size={12} />
+                                    <span className="max-w-[180px] truncate">{doc.filename || 'Proof Document'}</span>
+                                    <Download size={11} className="text-slate-500 ml-1" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Admin Decision Remarks */}
+                            <div>
+                              <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                                Administrative Decision Remarks (Optional note appended to student audit trail)
+                              </label>
+                              <input
+                                type="text"
+                                value={adminReliefNotes}
+                                onChange={(e) => setAdminReliefNotes(e.target.value)}
+                                placeholder="e.g., Verified fee receipt and income status. Disbursed from student relief fund."
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
+                              />
+                            </div>
+
+                            {/* Admin Action Buttons: Verify & Approve + Reject */}
+                            <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
+                              <button
+                                type="button"
+                                disabled={isAdminUpdatingRelief}
+                                onClick={() => handleAdminReliefAction('REJECTED')}
+                                className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <XCircle size={14} />
+                                Reject Request
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isAdminUpdatingRelief}
+                                onClick={() => handleAdminReliefAction('DISBURSED')}
+                                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                {isAdminUpdatingRelief ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                                Verify & Approve Fund
+                              </button>
                             </div>
                           </div>
+                        );
+                      }
 
-                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
-                            <span className="text-slate-500 block text-[11px] font-semibold mb-1">
-                              Faculty Case Justification & Notes:
-                            </span>
-                            <p className="text-slate-300 leading-relaxed italic">
-                              "{requestedNotes}"
-                            </p>
-                          </div>
-                        </div>
+                      if (isRequestedStatus) {
+                        return (
+                          /* CASE 2: REQUESTED & NO DOCS YET -> REQUEST DOCS OR REJECT */
+                          <div className="space-y-4">
+                            <div className="p-4 bg-amber-950/30 border border-amber-800/50 rounded-xl space-y-2">
+                              <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                                <AlertTriangle size={15} />
+                                <span>Emergency College Relief Fund Requested by Faculty</span>
+                              </div>
+                              <p className="text-xs text-amber-200/80">
+                                Department faculty have submitted an emergency relief request. Verification documents from the student are required before funds can be disbursed.
+                              </p>
+                            </div>
 
-                        {/* Uploaded Verification Documents (if any) */}
-                        {financialDocs.length > 0 && (
-                          <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-2">
-                            <h5 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                              <FileText size={13} className="text-indigo-400" />
-                              Uploaded Proof & Verification Documents ({financialDocs.length})
-                            </h5>
-                            <div className="flex flex-wrap gap-2">
-                              {financialDocs.map((doc, dIdx) => (
-                                <a
-                                  key={dIdx}
-                                  href={doc.fileData || doc.url || '#'}
-                                  download={doc.filename || `document_${dIdx + 1}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-slate-900/80 px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-indigo-500/50 transition"
-                                >
-                                  <FileText size={12} />
-                                  <span className="max-w-[180px] truncate">{doc.filename || 'Proof Document'}</span>
-                                  <Download size={11} className="text-slate-500 ml-1" />
-                                </a>
-                              ))}
+                            {/* Request Details Card */}
+                            <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                                <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                  <FileText size={14} className="text-amber-400" />
+                                  Pending Faculty Relief Request Details
+                                </h4>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  Submitted: {formatDate(requestedDate)}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
+                                  <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Emergency College Aid</span>
+                                </div>
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Support Category</span>
+                                  <span className="text-sm font-semibold text-white truncate block">{requestedCategory}</span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Institutional Quota</span>
+                                </div>
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Requested By Faculty</span>
+                                  <span className="text-sm font-semibold text-slate-200 truncate block">{requestedBy}</span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Department Advocate</span>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+                                <span className="text-slate-500 block text-[11px] font-semibold mb-1">Faculty Case Justification & Notes:</span>
+                                <p className="text-slate-300 leading-relaxed italic">"{requestedNotes}"</p>
+                              </div>
+                            </div>
+
+                            {/* Admin Decision Remarks */}
+                            <div>
+                              <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                                Administrative Decision Remarks (Optional note appended to student audit trail)
+                              </label>
+                              <input
+                                type="text"
+                                value={adminReliefNotes}
+                                onChange={(e) => setAdminReliefNotes(e.target.value)}
+                                placeholder="e.g., Requesting income certificate and fee dues statement."
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
+                              />
+                            </div>
+
+                            {/* Admin Action Buttons: Request Verification Documents + Reject */}
+                            <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
+                              <button
+                                type="button"
+                                disabled={isAdminUpdatingRelief}
+                                onClick={() => handleAdminReliefAction('REJECTED')}
+                                className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <XCircle size={14} />
+                                Reject Request
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isAdminUpdatingRelief}
+                                onClick={() => handleAdminReliefAction('DOCUMENTS_REQUIRED')}
+                                className="px-4 py-2 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <FileText size={14} />
+                                Request Verification Documents
+                              </button>
                             </div>
                           </div>
-                        )}
+                        );
+                      }
 
-                        {/* Admin Decision Remarks Note Field */}
-                        <div>
-                          <label className="block text-slate-300 font-semibold mb-1 text-xs">
-                            Administrative Decision Remarks (Optional note appended to student audit trail)
-                          </label>
-                          <input
-                            type="text"
-                            value={adminReliefNotes}
-                            onChange={(e) => setAdminReliefNotes(e.target.value)}
-                            placeholder="e.g., Verified fee receipt and income status. Disbursed from student relief fund."
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
-                          />
-                        </div>
+                      if (normalizedStatus === 'DOCUMENTS_REQUIRED') {
+                        return (
+                          /* CASE 3: DOCUMENTS REQUIRED & AWAITING STUDENT UPLOAD */
+                          <div className="space-y-4">
+                            <div className="p-4 bg-amber-950/30 border border-amber-800/50 rounded-xl space-y-2">
+                              <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                                <AlertTriangle size={15} />
+                                <span>Awaiting Verification Documents from Student</span>
+                              </div>
+                              <p className="text-xs text-amber-200/80">
+                                The student has been prompted on their portal to submit financial proof documents (income certificate, fee statements). Verification is required prior to approving disbursement.
+                              </p>
+                            </div>
 
-                        {/* 3 Explicit Admin Action Buttons */}
-                        <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
-                          {/* 1. Reject Request */}
-                          <button
-                            type="button"
-                            disabled={isAdminUpdatingRelief}
-                            onClick={() => handleAdminReliefAction('REJECTED')}
-                            className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
-                          >
-                            <XCircle size={14} />
-                            Reject Request
-                          </button>
+                            {/* Request Details Card */}
+                            <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
+                                  <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                                </div>
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Support Category</span>
+                                  <span className="text-sm font-semibold text-white">{requestedCategory}</span>
+                                </div>
+                                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                  <span className="text-slate-500 block text-[11px]">Faculty Advocate</span>
+                                  <span className="text-sm font-semibold text-slate-200">{requestedBy}</span>
+                                </div>
+                              </div>
 
-                          {/* 2. Request Verification Documents */}
-                          <button
-                            type="button"
-                            disabled={isAdminUpdatingRelief}
-                            onClick={() => handleAdminReliefAction('DOCUMENTS_REQUIRED')}
-                            className="px-4 py-2 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
-                          >
-                            <FileText size={14} />
-                            Request Verification Documents
-                          </button>
+                              <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+                                <span className="text-slate-500 block text-[11px] font-semibold mb-1">Faculty Notes:</span>
+                                <p className="text-slate-300 italic">"{requestedNotes}"</p>
+                              </div>
+                            </div>
 
-                          {/* 3. Approve & Disburse Funds */}
-                          <button
-                            type="button"
-                            disabled={isAdminUpdatingRelief}
-                            onClick={() => handleAdminReliefAction('DISBURSED')}
-                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 disabled:opacity-50"
-                          >
-                            {isAdminUpdatingRelief ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              <CheckCircle2 size={14} />
-                            )}
-                            Approve & Disburse Funds
-                          </button>
-                        </div>
-                      </div>
-                    ) : normalizedStatus === 'DOCUMENTS_REQUIRED' ? (
-                      /* CASE 2: DOCUMENTS REQUIRED */
-                      <div className="space-y-4">
-                        <div className="p-4 bg-amber-950/30 border border-amber-800/50 rounded-xl space-y-2">
-                          <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
-                            <AlertTriangle size={15} />
-                            <span>Awaiting Verification Documents from Student</span>
+                            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg text-xs text-slate-400 italic">
+                              Student has not uploaded proof files yet. Once uploaded, "Verify & Approve Fund" will be enabled.
+                            </div>
+
+                            {/* Decision Remarks */}
+                            <div>
+                              <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                                Administrative Decision Remarks (Optional)
+                              </label>
+                              <input
+                                type="text"
+                                value={adminReliefNotes}
+                                onChange={(e) => setAdminReliefNotes(e.target.value)}
+                                placeholder="Remarks for rejection if documents are unforthcoming..."
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
+                              <button
+                                type="button"
+                                disabled={isAdminUpdatingRelief}
+                                onClick={() => handleAdminReliefAction('REJECTED')}
+                                className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <XCircle size={14} />
+                                Reject Request
+                              </button>
+                            </div>
                           </div>
-                          <p className="text-xs text-amber-200/80">
-                            The student has been prompted on their portal to submit financial proof documents (income certificate, fee statements). You can approve disbursement immediately if satisfied or reject the claim.
+                        );
+                      }
+
+                      if (normalizedStatus === 'APPROVED' || normalizedStatus === 'DISBURSED') {
+                        return (
+                          /* CASE 4: APPROVED / DISBURSED (NO REJECT BUTTON) */
+                          <div className="bg-slate-950/80 rounded-xl border border-emerald-800/40 p-5 space-y-4">
+                            <div className="flex items-center gap-3 text-emerald-400">
+                              <CheckCircle2 size={24} />
+                              <div>
+                                <h4 className="text-sm font-bold text-white">Emergency Relief Grant Approved & Disbursed</h4>
+                                <p className="text-xs text-emerald-300/80">
+                                  Institutional funds have been allocated to the student's account to ensure study continuation.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-2">
+                              <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                <span className="text-slate-500 block text-[11px]">Disbursed Amount</span>
+                                <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
+                              </div>
+                              <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                <span className="text-slate-500 block text-[11px]">Category</span>
+                                <span className="text-sm font-semibold text-white">{requestedCategory}</span>
+                              </div>
+                              <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                                <span className="text-slate-500 block text-[11px]">Relief Record</span>
+                                <span className="text-sm font-semibold text-slate-200">Institutional Grant Active</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (normalizedStatus === 'REJECTED') {
+                        return (
+                          /* CASE 5: REJECTED */
+                          <div className="bg-slate-950/80 rounded-xl border border-red-800/40 p-5 space-y-4">
+                            <div className="flex items-center gap-3 text-red-400">
+                              <XCircle size={24} />
+                              <div>
+                                <h4 className="text-sm font-bold text-white">Emergency Relief Request Rejected</h4>
+                                <p className="text-xs text-red-300/80">
+                                  This application was reviewed and declined by administrative leadership.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        /* CASE 6: NONE */
+                        <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-8 text-center space-y-2">
+                          <DollarSign size={28} className="mx-auto text-slate-500" />
+                          <h4 className="text-sm font-semibold text-slate-300">No Emergency Relief Request Active</h4>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Department faculty have not submitted an institutional relief fund request for this student. When faculty submit a request, administrative review options will be displayed here.
                           </p>
                         </div>
-
-                        {/* Request Details Card */}
-                        <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                              <span className="text-slate-500 block text-[11px]">Requested Grant Amount</span>
-                              <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
-                            </div>
-                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                              <span className="text-slate-500 block text-[11px]">Support Category</span>
-                              <span className="text-sm font-semibold text-white">{requestedCategory}</span>
-                            </div>
-                            <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                              <span className="text-slate-500 block text-[11px]">Faculty Advocate</span>
-                              <span className="text-sm font-semibold text-slate-200">{requestedBy}</span>
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
-                            <span className="text-slate-500 block text-[11px] font-semibold mb-1">Faculty Notes:</span>
-                            <p className="text-slate-300 italic">"{requestedNotes}"</p>
-                          </div>
-                        </div>
-
-                        {/* Uploaded Documents */}
-                        <div className="bg-slate-950/80 rounded-xl border border-slate-800 p-4 space-y-2">
-                          <h5 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                            <FileText size={13} className="text-indigo-400" />
-                            Student Uploaded Proof Documents ({financialDocs.length})
-                          </h5>
-                          {financialDocs.length === 0 ? (
-                            <p className="text-xs text-slate-500 italic py-2">
-                              Student has not uploaded proof files yet.
-                            </p>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {financialDocs.map((doc, dIdx) => (
-                                <a
-                                  key={dIdx}
-                                  href={doc.fileData || doc.url || '#'}
-                                  download={doc.filename || `document_${dIdx + 1}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-slate-900/80 px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-indigo-500/50 transition"
-                                >
-                                  <FileText size={12} />
-                                  <span className="max-w-[180px] truncate">{doc.filename || 'Proof Document'}</span>
-                                  <Download size={11} className="text-slate-500 ml-1" />
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Decision Remarks */}
-                        <div>
-                          <label className="block text-slate-300 font-semibold mb-1 text-xs">
-                            Administrative Decision Remarks (Optional)
-                          </label>
-                          <input
-                            type="text"
-                            value={adminReliefNotes}
-                            onChange={(e) => setAdminReliefNotes(e.target.value)}
-                            placeholder="Remarks for approval or rejection..."
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500 text-xs"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-end gap-3 flex-wrap pt-2 border-t border-slate-800">
-                          <button
-                            type="button"
-                            disabled={isAdminUpdatingRelief}
-                            onClick={() => handleAdminReliefAction('REJECTED')}
-                            className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-700/60 font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
-                          >
-                            <XCircle size={14} />
-                            Reject Request
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isAdminUpdatingRelief}
-                            onClick={() => handleAdminReliefAction('DISBURSED')}
-                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 disabled:opacity-50"
-                          >
-                            {isAdminUpdatingRelief ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              <CheckCircle2 size={14} />
-                            )}
-                            Approve & Disburse Funds
-                          </button>
-                        </div>
-                      </div>
-                    ) : normalizedStatus === 'APPROVED' || normalizedStatus === 'DISBURSED' ? (
-                      /* CASE 3: APPROVED / DISBURSED */
-                      <div className="bg-slate-950/80 rounded-xl border border-emerald-800/40 p-5 space-y-4">
-                        <div className="flex items-center gap-3 text-emerald-400">
-                          <CheckCircle2 size={24} />
-                          <div>
-                            <h4 className="text-sm font-bold text-white">Emergency Relief Grant Approved & Disbursed</h4>
-                            <p className="text-xs text-emerald-300/80">
-                              Institutional funds have been allocated to the student's account to ensure study continuation.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-2">
-                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                            <span className="text-slate-500 block text-[11px]">Disbursed Amount</span>
-                            <span className="text-base font-bold text-emerald-400">₹{requestedAmountFormatted}</span>
-                          </div>
-                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                            <span className="text-slate-500 block text-[11px]">Category</span>
-                            <span className="text-sm font-semibold text-white">{requestedCategory}</span>
-                          </div>
-                          <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                            <span className="text-slate-500 block text-[11px]">Relief Record</span>
-                            <span className="text-sm font-semibold text-slate-200">Institutional Grant Active</span>
-                          </div>
-                        </div>
-                      </div>
-                    ) : normalizedStatus === 'REJECTED' ? (
-                      /* CASE 4: REJECTED */
-                      <div className="bg-slate-950/80 rounded-xl border border-red-800/40 p-5 space-y-4">
-                        <div className="flex items-center gap-3 text-red-400">
-                          <XCircle size={24} />
-                          <div>
-                            <h4 className="text-sm font-bold text-white">Emergency Relief Request Rejected</h4>
-                            <p className="text-xs text-red-300/80">
-                              This application was reviewed and declined by administrative leadership.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      /* CASE 5: NONE */
-                      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-8 text-center space-y-2">
-                        <DollarSign size={28} className="mx-auto text-slate-500" />
-                        <h4 className="text-sm font-semibold text-slate-300">No Emergency Relief Request Active</h4>
-                        <p className="text-xs text-slate-500 max-w-md mx-auto">
-                          Department faculty have not submitted an institutional relief fund request for this student. When faculty submit a request, administrative review options will be displayed here.
-                        </p>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 ) : isCounselor ? (
                   /* COUNSELOR READ-ONLY VIEW */

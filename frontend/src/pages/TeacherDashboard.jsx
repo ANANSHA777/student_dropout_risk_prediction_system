@@ -228,6 +228,13 @@ const TeacherDashboard = () => {
             academicPlan: updatedPlan,
             plan: updatedPlan,
             academicIntervention: updatedPlan,
+            academic_remedial_plan: {
+              plan_title: planType,
+              plan_details: notes,
+              target_metrics: 'Target CGPA: ≥ 6.0, Attendance: ≥ 75%',
+              status: 'IN_PROGRESS',
+              assigned_at: new Date(),
+            },
             actionTaken: `Plan Assigned: ${planType}`,
           };
         })
@@ -235,6 +242,13 @@ const TeacherDashboard = () => {
 
       showFeedback(`Academic plan successfully assigned to ${selectedStudentForPlan?.name || 'student'}.`);
       setIsAcademicPlanModalOpen(false);
+
+      // Full backend data refresh
+      try {
+        await loadData();
+      } catch (refreshErr) {
+        console.warn('Silent refresh error after academic plan assignment:', refreshErr);
+      }
     } catch (err) {
       setError(`Failed to assign plan: ${err.message}`);
     }

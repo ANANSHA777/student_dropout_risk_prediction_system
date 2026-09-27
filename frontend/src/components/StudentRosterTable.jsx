@@ -22,7 +22,10 @@ import {
 
 function extractAssignedPlan(student) {
   if (!student) return null;
-  return (
+  const sId = student._id || student.id || student.studentId;
+
+  // 1. Direct fields
+  const directPlan =
     student.assignedAcademicPlan ||
     student.academicPlan ||
     student.assignedPlan ||
@@ -33,8 +36,36 @@ function extractAssignedPlan(student) {
     (Array.isArray(student.interventions) && student.interventions[0]) ||
     (Array.isArray(student.academicPlans) && student.academicPlans[0]) ||
     student.riskEvaluation?.assignedPlan ||
-    null
-  );
+    null;
+
+  if (directPlan && typeof directPlan === 'object' && directPlan.status === 'NOT_REQUIRED' && !directPlan.plan_title && !directPlan.planType) {
+    // not a configured plan
+  } else if (directPlan) {
+    return directPlan;
+  }
+
+  // 2. Check academic_remedial_plan object
+  const remPlan = student.academic_remedial_plan;
+  if (remPlan && typeof remPlan === 'object') {
+    const rStatus = (remPlan.status || '').toUpperCase();
+    if (rStatus === 'IN_PROGRESS' || rStatus === 'COMPLETED' || rStatus === 'ACTIVE' || remPlan.plan_title) {
+      return remPlan;
+    }
+  }
+
+  // 3. LocalStorage persistence check by student ID
+  try {
+    if (sId && typeof window !== 'undefined' && window.localStorage) {
+      const localPlans = JSON.parse(localStorage.getItem('assigned_academic_plans') || '{}');
+      if (localPlans[sId]) {
+        return localPlans[sId];
+      }
+    }
+  } catch (e) {
+    // Ignore localStorage parse error
+  }
+
+  return null;
 }
 
 // Deep Root-Cause Evaluator matching exact MongoDB schema values
@@ -99,18 +130,15 @@ function evaluateStudentRootCause(student) {
   const isHighFinancialStress = ['high', 'severe', 'critical'].some(term => finStressStr.includes(term));
   const isLowIncome = ['below 30', 'below ₹30,000', 'below 30,000', '< 30000', '< 30,000', 'poor', 'poverty', '15,000'].some(term => finIncomeStr.includes(term));
   const isHighIncome = ['above 60', 'above ₹60,000', 'above 60,000', '> 60000', '> 60,000', 'above 1,00,000', 'above 100000'].some(term => finIncomeStr.includes(term));
-  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED'].includes((student.financial_relief_status || '').toUpperCase());
+  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED'].includes((student.financial_relief_status || '').toUpperCase());
 
   const hasFinancialIssue = (isHighFinancialStress || isLowIncome || hasExistingReliefRequest) && !(isHighIncome && !isHighFinancialStress);
 
   // External Stress (Commute "More than 2 hours" & Self-Study "Less than 1 hour")
   const commuteStr = getValStr('commuteTime', 'dailyCommuteTime', 'travelTime');
   const hasCommuteIssue = ['more than 2', '2 hours', 'long', 'high', 'far'].some(term => commuteStr.includes(term));
-  
-  const studyStr = getValStr('studyHoursPerDay', 'dailySelfStudyHours', 'studyHours');
-  const hasZeroOrLowStudyHours = ['less than 1', '0 hours', 'zero', '1 hour', 'less than 1 hour'].some(term => studyStr.includes(term));
 
-  const hasPersonalOrFinancialRisk = hasWellnessIssue || isDisengaged || hasFinancialIssue || hasCommuteIssue || hasZeroOrLowStudyHours;
+  const hasPersonalOrFinancialRisk = hasWellnessIssue || isDisengaged || hasFinancialIssue || hasCommuteIssue;
 
   // Unsuppress Academic Plan for low metrics: CGPA < 6.0 or Attendance < 75%
   const hasLowAcademicMetrics = (cgpa !== null && cgpa < 6.0) || (attendance !== null && attendance < 75);
@@ -131,7 +159,7 @@ function evaluateStudentRootCause(student) {
     hasPersonalOrFinancialRisk,
     riskCategoryClassification,
     showFinancialAidOption: hasFinancialIssue, // Strictly enabled only if financially eligible
-    showCounselorBtn: hasWellnessIssue || isDisengaged || hasCommuteIssue || hasZeroOrLowStudyHours,
+    showCounselorBtn: hasWellnessIssue || isDisengaged,
     showAcademicPlanBtn: isAcademicRisk || hasLowAcademicMetrics,
   };
 }
@@ -279,6 +307,38 @@ function StudentRosterRow({
     if (handler) handler(student);
   };
 
+  const acadPlanObj = student.academic_remedial_plan;
+  const rawPlanStatus = (acadPlanObj?.status || '').toUpperCase();
+  const isCompletedPlan =
+    rawPlanStatus === 'COMPLETED' ||
+    (assignedPlan?.status || '').toUpperCase() === 'COMPLETED';
+
+  const isActivePlan =
+    !isCompletedPlan &&
+    (
+      rawPlanStatus === 'IN_PROGRESS' ||
+      rawPlanStatus === 'ACTIVE' ||
+      rawPlanStatus === 'ASSIGNED' ||
+      rawPlanStatus === 'PENDING' ||
+      Boolean(acadPlanObj?.plan_title) ||
+      Boolean(assignedPlan)
+    );
+
+  const currentAcadPlanStatus = isCompletedPlan ? 'COMPLETED' : isActivePlan ? 'IN_PROGRESS' : 'NOT_REQUIRED';
+  const currentCounselingStatus = (student.counseling_session?.status || '').toUpperCase();
+  const currentReliefStatus = (student.financial_relief_status || (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')).toUpperCase();
+
+  const hasAcadPlan = isCompletedPlan || isActivePlan || evaluationAnalysis.hasLowAcademicMetrics;
+  const hasCounselor = Boolean(assignedCounselor || evaluationAnalysis.showCounselorBtn);
+  const hasAid = currentReliefStatus !== 'NONE';
+
+  const acadDone = !hasAcadPlan || isCompletedPlan;
+  const counselorDone = !hasCounselor || currentCounselingStatus === 'COMPLETED';
+  const aidDone = !hasAid || currentReliefStatus === 'APPROVED' || currentReliefStatus === 'DISBURSED';
+
+  const hasAnyIntervention = (isCompletedPlan || currentCounselingStatus === 'COMPLETED' || currentReliefStatus === 'APPROVED' || currentReliefStatus === 'DISBURSED');
+  const allInterventionsCompleted = hasAnyIntervention && acadDone && counselorDone && aidDone;
+
   let planTitle = 'Academic Support Plan';
   if (typeof assignedPlan === 'string') {
     planTitle = assignedPlan;
@@ -410,7 +470,7 @@ function StudentRosterRow({
       </td>
 
       {/* Recommended Interventions (Teacher view) OR Actions Logged (Admin view) */}
-      <td className="py-4 px-5">
+      <td className="py-4 px-5 min-w-[220px]">
         {!showActions ? (
           /* ADMIN VIEW: ACTIONS LOGGED & OFFICIAL GOVERNANCE STATUS BADGES */
           <div className="space-y-2 min-w-[170px] max-w-[240px]">
@@ -459,17 +519,19 @@ function StudentRosterRow({
               {/* 2. Academic Remedial Plan Status Pill */}
               {(() => {
                 const acadPlan = student.academic_remedial_plan;
-                const aStatus = (acadPlan?.status || (student.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
+                const rStatus = (acadPlan?.status || '').toUpperCase();
+                const isComp = rStatus === 'COMPLETED' || (student.assignedAcademicPlan?.status || '').toUpperCase() === 'COMPLETED';
+                const isAct = !isComp && (rStatus === 'IN_PROGRESS' || rStatus === 'ACTIVE' || Boolean(acadPlan?.plan_title) || Boolean(student.assignedAcademicPlan));
 
                 let badgeText = 'Plan: Not Required';
                 let badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
 
-                if (aStatus === 'COMPLETED') {
+                if (isComp) {
                   badgeText = 'Academic Plan Completed';
                   badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40';
-                } else if (aStatus === 'IN_PROGRESS') {
-                  badgeText = 'Plan: In Progress';
-                  badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/40';
+                } else if (isAct) {
+                  badgeText = 'Academic Plan Active';
+                  badgeClass = 'bg-blue-950/80 text-blue-300 border-blue-500/40';
                 } else {
                   badgeText = 'Plan: Not Required';
                   badgeClass = 'bg-slate-800/80 text-slate-400 border-slate-700';
@@ -498,6 +560,9 @@ function StudentRosterRow({
                 if (fStatus === 'APPROVED' || fStatus === 'DISBURSED') {
                   badgeText = 'Fund Disbursed';
                   badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40';
+                } else if (fStatus === 'DOCUMENTS_SUBMITTED') {
+                  badgeText = 'Documents Under Review';
+                  badgeClass = 'bg-blue-950/80 text-blue-300 border-blue-500/40';
                 } else if (fStatus === 'DOCUMENTS_REQUIRED') {
                   badgeText = 'Documents Requested';
                   badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/40';
@@ -566,7 +631,7 @@ function StudentRosterRow({
           </div>
         ) : isRiskEvaluated ? (
           /* TEACHER VIEW: RECOMMENDED INTERVENTIONS */
-          <div className="flex flex-col gap-1.5 min-w-[170px] max-w-[220px]">
+          <div className="flex flex-col gap-1.5 w-full min-w-[190px] max-w-[240px]">
             {/* 1. Academic Remedial Plan Module */}
             {(() => {
               const hasAcademicRisk =
@@ -575,30 +640,66 @@ function StudentRosterRow({
                 evaluationAnalysis.hasLowAcademicMetrics;
 
               const acadPlan = student.academic_remedial_plan;
-              const acadPlanStatus = (acadPlan?.status || (assignedPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
+              const rawStatus = (acadPlan?.status || '').toUpperCase();
 
-              if (acadPlanStatus === 'COMPLETED') {
+              const isComp =
+                rawStatus === 'COMPLETED' ||
+                (assignedPlan?.status || '').toUpperCase() === 'COMPLETED';
+
+              const isAct =
+                !isComp &&
+                (
+                  rawStatus === 'IN_PROGRESS' ||
+                  rawStatus === 'ACTIVE' ||
+                  rawStatus === 'ASSIGNED' ||
+                  rawStatus === 'PENDING' ||
+                  Boolean(acadPlan?.plan_title) ||
+                  Boolean(assignedPlan)
+                );
+
+              const hasExistingPlan = isComp || isAct;
+
+              // 1. If completed: non-clickable emerald status badge
+              if (isComp) {
                 return (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/60 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                  <div
+                    className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/60 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold select-none cursor-default"
+                    title="Academic Remedial Plan has been completed"
+                  >
                     <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
                     <span className="truncate">Academic Plan Completed</span>
                   </div>
                 );
               }
-              if (acadPlanStatus === 'IN_PROGRESS') {
+
+              // 2. If active / assigned: blue status badge + faculty Verify action
+              if (isAct) {
                 return (
-                  <button
-                    type="button"
-                    onClick={() => onCompleteAcademicPlan && onCompleteAcademicPlan(student)}
-                    className="h-8 w-full px-2 bg-blue-950/70 hover:bg-blue-900/80 text-blue-200 border border-blue-500/40 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Click to mark academic remedial plan as completed"
-                  >
-                    <Clock size={13} className="text-blue-300 shrink-0" />
-                    <span>Plan: In Progress</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 w-full">
+                    <div
+                      className="inline-flex items-center gap-1.5 text-xs text-blue-300 bg-blue-950/60 px-2 py-1.5 rounded-lg border border-blue-500/40 font-semibold select-none flex-1 min-w-0"
+                      title="Academic Remedial Plan is currently in progress"
+                    >
+                      <Clock size={13} className="text-blue-400 shrink-0" />
+                      <span className="truncate">Academic Plan In Progress</span>
+                    </div>
+                    {onCompleteAcademicPlan && (
+                      <button
+                        type="button"
+                        onClick={() => onCompleteAcademicPlan(student)}
+                        className="h-7 px-2 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shrink-0 shadow active:scale-95"
+                        title="Verify and Mark Academic Plan as Completed"
+                      >
+                        <Check size={12} />
+                        <span>Verify</span>
+                      </button>
+                    )}
+                  </div>
                 );
               }
-              if (hasAcademicRisk) {
+
+              // 3. Only if NO plan exists AND student has academic risk: render Assign button
+              if (!hasExistingPlan && hasAcademicRisk) {
                 return (
                   <button
                     type="button"
@@ -611,6 +712,7 @@ function StudentRosterRow({
                   </button>
                 );
               }
+
               return null;
             })()}
 
@@ -621,6 +723,7 @@ function StudentRosterRow({
                 student.financial_relief_status ||
                 (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')
               ).toUpperCase();
+              const hasUploadedDocs = Array.isArray(student.financial_documents) && student.financial_documents.length > 0;
 
               if (reliefStatus === 'DISBURSED') {
                 return (
@@ -638,11 +741,19 @@ function StudentRosterRow({
                   </div>
                 );
               }
+              if (reliefStatus === 'DOCUMENTS_SUBMITTED' || (hasUploadedDocs && (reliefStatus === 'REQUESTED' || reliefStatus === 'DOCUMENTS_REQUIRED'))) {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-blue-300 bg-blue-950/60 p-1.5 rounded-lg border border-blue-500/40 w-full font-semibold">
+                    <Clock size={13} className="text-blue-400 shrink-0" />
+                    <span className="truncate">$ Under Admin Review</span>
+                  </div>
+                );
+              }
               if (reliefStatus === 'DOCUMENTS_REQUIRED') {
                 return (
                   <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
                     <Clock size={13} className="text-amber-400 shrink-0" />
-                    <span className="truncate">$ Documents Requested</span>
+                    <span className="truncate">$ Pending Documents</span>
                   </div>
                 );
               }
@@ -650,7 +761,7 @@ function StudentRosterRow({
                 return (
                   <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
                     <Clock size={13} className="text-amber-400 shrink-0" />
-                    <span className="truncate">$ Pending Aid</span>
+                    <span className="truncate">$ Documents Requested</span>
                   </div>
                 );
               }
@@ -663,7 +774,7 @@ function StudentRosterRow({
                     title="Request Institutional Emergency College Fund"
                   >
                     <DollarSign size={13} className="text-emerald-300 shrink-0" />
-                    <span>$ Request College Fund</span>
+                    <span>$ Request Fund</span>
                   </button>
                 );
               }
@@ -672,6 +783,7 @@ function StudentRosterRow({
 
             {/* 3. Counselor Assignment Module */}
             {(() => {
+              const counselingSessionStatus = (student.counseling_session?.status || '').toUpperCase();
               const hasCounselorNeed = Boolean(
                 evaluationAnalysis.showCounselorBtn ||
                 categoryLower.includes('wellness') ||
@@ -680,6 +792,14 @@ function StudentRosterRow({
                 categoryLower.includes('dual')
               );
 
+              if (counselingSessionStatus === 'COMPLETED') {
+                return (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/60 p-1.5 rounded-lg border border-emerald-500/40 w-full font-semibold">
+                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">Counseling Completed</span>
+                  </div>
+                );
+              }
               if (assignedCounselor) {
                 return (
                   <div className="inline-flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 w-full font-semibold">
@@ -710,13 +830,13 @@ function StudentRosterRow({
                 (cgpaVal !== null && Number(cgpaVal) < 6.0) ||
                 (attendanceVal !== null && Number(attendanceVal) < 75) ||
                 evaluationAnalysis.hasLowAcademicMetrics;
-              const acadPlan = student.academic_remedial_plan;
-              const acadPlanStatus = (acadPlan?.status || (assignedPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
+              const hasAnyPlan = currentAcadPlanStatus === 'COMPLETED' || currentAcadPlanStatus === 'IN_PROGRESS';
               const hasFinancialNeed = evaluationAnalysis.showFinancialAidOption;
               const reliefStatus = (
                 student.financial_relief_status ||
                 (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')
               ).toUpperCase();
+              const counselingSessionStatus = (student.counseling_session?.status || '').toUpperCase();
               const hasCounselorNeed = Boolean(
                 evaluationAnalysis.showCounselorBtn ||
                 categoryLower.includes('wellness') ||
@@ -727,11 +847,13 @@ function StudentRosterRow({
 
               if (
                 !hasAcademicRisk &&
-                acadPlanStatus === 'NOT_REQUIRED' &&
+                !hasAnyPlan &&
                 !hasFinancialNeed &&
                 reliefStatus === 'NONE' &&
                 !assignedCounselor &&
-                !hasCounselorNeed
+                counselingSessionStatus !== 'COMPLETED' &&
+                !hasCounselorNeed &&
+                !allInterventionsCompleted
               ) {
                 return <span className="text-xs text-slate-400 italic">Standard Monitoring</span>;
               }
@@ -745,14 +867,17 @@ function StudentRosterRow({
 
       {/* Control Actions */}
       {showActions && (
-        <td className="py-4 px-5 text-right">
-          <div className="flex items-center justify-end gap-2">
+        <td className="py-4 px-5 text-right min-w-[340px] whitespace-nowrap">
+          <div
+            className="flex items-center justify-end gap-2 flex-nowrap shrink-0"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap' }}
+          >
             {/* DETAIL PANEL BUTTON */}
             <button
               type="button"
               onClick={() => canViewDetails && onOpenDetailModal && onOpenDetailModal(student)}
               disabled={!canViewDetails}
-              className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
                 canViewDetails
                   ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer shadow-sm active:scale-95'
                   : 'bg-slate-900/50 text-slate-600 border border-slate-800 cursor-not-allowed opacity-50'
@@ -767,7 +892,7 @@ function StudentRosterRow({
             <button
               type="button"
               onClick={() => onOpenRecordModal && onOpenRecordModal(student)}
-              className="h-8 px-2.5 bg-[#1e1c3b] hover:bg-[#28254f] text-[#a5b4fc] border border-[#3b3566] rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
+              className="h-8 px-2.5 bg-[#1e1c3b] hover:bg-[#28254f] text-[#a5b4fc] border border-[#3b3566] rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0 whitespace-nowrap"
               title="Edit Marks"
             >
               <Edit3 size={13} className="text-[#818cf8] shrink-0" />
@@ -779,11 +904,19 @@ function StudentRosterRow({
               <button
                 type="button"
                 onClick={() => onRequestSurveyResubmission(studentDbId, student.name)}
-                className="h-8 px-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/40 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0"
-                title="Request Student Survey Re-submission (Reset 14-day Cooldown)"
+                className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0 whitespace-nowrap ${
+                  allInterventionsCompleted
+                    ? 'bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/60 ring-1 ring-emerald-500/30'
+                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/40'
+                }`}
+                title={
+                  allInterventionsCompleted
+                    ? 'All interventions completed! Click to trigger student re-survey for recovery evaluation.'
+                    : 'Request Student Survey Re-submission (Reset 14-day Cooldown)'
+                }
               >
-                <RotateCcw size={13} className="text-amber-400 shrink-0" />
-                <span className="hidden xl:inline">Re-survey</span>
+                <RotateCcw size={13} className={allInterventionsCompleted ? 'text-emerald-400 shrink-0' : 'text-amber-400 shrink-0'} />
+                <span>{allInterventionsCompleted ? 'Re-survey (Ready)' : 'Re-survey'}</span>
               </button>
             )}
 
@@ -793,7 +926,7 @@ function StudentRosterRow({
               onClick={() => onEvaluateRisk && onEvaluateRisk(studentDbId)}
               disabled={!canEvaluate || isEvaluatingThisStudent}
               title={getEvaluateTooltip()}
-              className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
                 canEvaluate
                   ? 'bg-[#26180b] hover:bg-[#38220f] text-[#fde047] border border-[#78350f] cursor-pointer shadow-sm active:scale-95'
                   : 'bg-slate-900/50 text-slate-600 border border-slate-800 cursor-not-allowed opacity-50'
@@ -843,17 +976,17 @@ export default function StudentRosterTable({
 
   return (
     <div className="bg-[#0b0f19] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+      <div className="overflow-x-auto w-full">
+        <table className="w-full min-w-[1180px] text-left border-collapse">
           <thead>
             <tr className="border-b border-slate-800/80 bg-[#080c14] text-slate-400 text-[11px] font-semibold uppercase tracking-wider select-none">
-              <th className="py-4 px-5">Student</th>
-              <th className="py-4 px-5">ID / Year</th>
-              <th className="py-4 px-5">CGPA / Attendance</th>
-              <th className="py-4 px-5">Survey Status</th>
-              <th className="py-4 px-5">Risk Evaluation</th>
-              <th className="py-4 px-5">{showActions ? 'Recommended Intervention' : 'Actions Logged'}</th>
-              {showActions && <th className="py-4 px-5 text-right">Actions</th>}
+              <th className="py-4 px-5 min-w-[180px]">Student</th>
+              <th className="py-4 px-5 min-w-[100px]">ID / Year</th>
+              <th className="py-4 px-5 min-w-[130px]">CGPA / Attendance</th>
+              <th className="py-4 px-5 min-w-[110px]">Survey Status</th>
+              <th className="py-4 px-5 min-w-[150px]">Risk Evaluation</th>
+              <th className="py-4 px-5 min-w-[220px]">{showActions ? 'Recommended Intervention' : 'Actions Logged'}</th>
+              {showActions && <th className="py-4 px-5 text-right min-w-[340px]">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 text-sm">

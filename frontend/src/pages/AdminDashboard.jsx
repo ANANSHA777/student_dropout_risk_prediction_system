@@ -173,7 +173,7 @@ export default function AdminDashboard() {
     return students.filter((s) => {
       const status = (s.financial_relief_status || '').toUpperCase();
       return (
-        ['REQUESTED', 'DOCUMENTS_REQUIRED', 'APPROVED', 'DISBURSED', 'REJECTED'].includes(status) ||
+        ['REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED', 'REJECTED'].includes(status) ||
         s.financialAidStatus === 'Pending Institutional Support' ||
         s.collegeFinancialAid?.status === 'Pending Institutional Support'
       );
@@ -186,6 +186,7 @@ export default function AdminDashboard() {
       return (
         status === 'REQUESTED' ||
         status === 'DOCUMENTS_REQUIRED' ||
+        status === 'DOCUMENTS_SUBMITTED' ||
         s.financialAidStatus === 'Pending Institutional Support'
       );
     }).length;
@@ -285,10 +286,17 @@ export default function AdminDashboard() {
     let totalAssigned = 0;
     let completed = 0;
     (students || []).forEach((s) => {
-      const hasCounselor = s.assigned_counselor_id || s.assignedCounselor || s.counseling_session;
-      if (hasCounselor) {
+      const assignedId = s.assigned_counselor_id || s.assignedCounselor;
+      const isAssigned = Boolean(
+        assignedId &&
+        assignedId !== 'null' &&
+        assignedId !== 'undefined' &&
+        String(assignedId).trim() !== ''
+      );
+      if (isAssigned) {
         totalAssigned += 1;
-        if (s.counseling_session?.status === 'COMPLETED') {
+        const status = (s.counseling_session?.status || '').toUpperCase();
+        if (status === 'COMPLETED') {
           completed += 1;
         }
       }
@@ -810,11 +818,13 @@ export default function AdminDashboard() {
                                   ? 'bg-amber-950/60 text-amber-300 border-amber-500/40 animate-pulse'
                                   : rawStatus === 'DOCUMENTS_REQUIRED'
                                   ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
+                                  : rawStatus === 'DOCUMENTS_SUBMITTED'
+                                  ? 'bg-blue-950/60 text-blue-300 border-blue-500/40'
                                   : rawStatus === 'APPROVED' || rawStatus === 'DISBURSED'
                                   ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
                                   : 'bg-red-950/60 text-red-300 border-red-500/40'
                               }`}>
-                                {rawStatus}
+                                {rawStatus === 'APPROVED' ? 'DISBURSED' : rawStatus}
                               </span>
                             </td>
                             <td className="p-3">
@@ -841,42 +851,74 @@ export default function AdminDashboard() {
                             </td>
                             <td className="p-3 text-right">
                               <div className="flex items-center justify-end gap-2 flex-wrap">
-                                {/* Request Documents */}
-                                {rawStatus !== 'DOCUMENTS_REQUIRED' && rawStatus !== 'DISBURSED' && (
-                                  <button
-                                    type="button"
-                                    disabled={isUpdating}
-                                    onClick={() => handleUpdateReliefStatus(sId, 'DOCUMENTS_REQUIRED', student.name)}
-                                    className="px-2.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border border-amber-700/50 rounded-lg text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50"
-                                  >
-                                    Request Documents
-                                  </button>
-                                )}
+                                {(() => {
+                                  const isDisbursed = rawStatus === 'APPROVED' || rawStatus === 'DISBURSED';
+                                  const isRejected = rawStatus === 'REJECTED';
+                                  const hasUploadedDocs = docs.length > 0;
+                                  const isDocSubmitted = rawStatus === 'DOCUMENTS_SUBMITTED' || (hasUploadedDocs && (rawStatus === 'REQUESTED' || rawStatus === 'DOCUMENTS_REQUIRED'));
 
-                                {/* Approve & Disburse */}
-                                {rawStatus !== 'DISBURSED' && (
-                                  <button
-                                    type="button"
-                                    disabled={isUpdating}
-                                    onClick={() => handleUpdateReliefStatus(sId, 'DISBURSED', student.name)}
-                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
-                                  >
-                                    <Check size={13} />
-                                    Approve & Disburse Funds
-                                  </button>
-                                )}
+                                  if (isDisbursed) {
+                                    return (
+                                      <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                        <Check size={12} /> DISBURSED
+                                      </span>
+                                    );
+                                  }
 
-                                {/* Reject Request */}
-                                {rawStatus !== 'REJECTED' && (
-                                  <button
-                                    type="button"
-                                    disabled={isUpdating}
-                                    onClick={() => handleUpdateReliefStatus(sId, 'REJECTED', student.name)}
-                                    className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-700/50 rounded-lg text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50"
-                                  >
-                                    Reject Request
-                                  </button>
-                                )}
+                                  if (isRejected) {
+                                    return (
+                                      <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-red-950/60 text-red-300 border border-red-500/40">
+                                        REJECTED
+                                      </span>
+                                    );
+                                  }
+
+                                  return (
+                                    <>
+                                      {/* If REQUESTED and no docs yet: Show Request Documents */}
+                                      {rawStatus === 'REQUESTED' && !hasUploadedDocs && (
+                                        <button
+                                          type="button"
+                                          disabled={isUpdating}
+                                          onClick={() => handleUpdateReliefStatus(sId, 'DOCUMENTS_REQUIRED', student.name)}
+                                          className="px-2.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border border-amber-700/50 rounded-lg text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50"
+                                        >
+                                          Request Documents
+                                        </button>
+                                      )}
+
+                                      {/* If DOCUMENTS_REQUIRED and no docs yet: Show Awaiting Student Documents */}
+                                      {rawStatus === 'DOCUMENTS_REQUIRED' && !hasUploadedDocs && (
+                                        <span className="text-xs text-amber-400 font-medium px-2 py-1 bg-amber-950/40 rounded border border-amber-800/40">
+                                          Awaiting Student Documents
+                                        </span>
+                                      )}
+
+                                      {/* If DOCUMENTS_SUBMITTED or docs uploaded: Show Verify & Approve Fund */}
+                                      {isDocSubmitted && (
+                                        <button
+                                          type="button"
+                                          disabled={isUpdating}
+                                          onClick={() => handleUpdateReliefStatus(sId, 'DISBURSED', student.name)}
+                                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
+                                        >
+                                          <Check size={13} />
+                                          Verify & Approve Fund
+                                        </button>
+                                      )}
+
+                                      {/* Reject Request button (Strictly removed once approved/disbursed) */}
+                                      <button
+                                        type="button"
+                                        disabled={isUpdating}
+                                        onClick={() => handleUpdateReliefStatus(sId, 'REJECTED', student.name)}
+                                        className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-700/50 rounded-lg text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50"
+                                      >
+                                        Reject Request
+                                      </button>
+                                    </>
+                                  );
+                                })()}
 
                                 {/* Details & Audit Log */}
                                 <button

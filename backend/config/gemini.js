@@ -9,13 +9,13 @@ const ai = new GoogleGenAI({
  * Executes a Gemini prompt with structured JSON response configuration.
  * 
  * @param {string} prompt - The prompt string to be evaluated.
- * @param {string} [modelName='gemini-2.5-flash'] - Model identifier.
+ * @param {string} [modelName='gemini-1.5-flash'] - Model identifier.
  * @param {Object} [schema=null] - Optional OpenAPI JSON response schema for strict validation.
  * @returns {Promise<Object>} The parsed JSON object returned by Gemini.
  */
 const generateJSONContent = async (
   prompt,
-  modelName = 'gemini-2.5-flash',
+  modelName = 'gemini-1.5-flash',
   schema = null
 ) => {
   const config = {
