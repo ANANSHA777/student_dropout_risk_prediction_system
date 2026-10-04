@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Brain, CheckCircle2, Send, AlertCircle, Edit3, ChevronUp, Clock, Sparkles } from 'lucide-react';
+import { Brain, CheckCircle2, Send, AlertCircle, Edit3, ChevronUp, Clock, Sparkles, Lock } from 'lucide-react';
 
 export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted, studentId }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -46,8 +46,8 @@ export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted,
   const isAllInterventionsDone = Boolean(
     initialData?.allInterventionsCompleted ||
     (initialData?.academic_remedial_plan?.status === 'COMPLETED' &&
-      (!initialData?.assigned_counselor_id || initialData?.counseling_session?.status === 'COMPLETED') &&
-      (!initialData?.financial_relief_status || initialData?.financial_relief_status === 'NONE' || initialData?.financial_relief_status === 'APPROVED' || initialData?.financial_relief_status === 'DISBURSED'))
+      (!initialData?.assigned_counselor_id || ['COMPLETED', 'RESOLVED'].includes((initialData?.counseling_session?.status || '').toUpperCase())) &&
+      (!initialData?.financial_relief_status || initialData?.financial_relief_status === 'NONE' || initialData?.financial_relief_status === 'DISBURSED'))
   );
 
   const handleChange = (e) => {
@@ -149,10 +149,10 @@ export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted,
           </span>
 
           {/* Cooldown pill */}
-          {isCompleted && initialData?.cooldownActive && !isAllInterventionsDone && (
-            <span className="text-[11px] text-amber-400 font-medium px-2.5 py-1 rounded-full bg-amber-950/50 border border-amber-500/30 flex items-center gap-1.5">
-              <Clock size={12} />
-              Cooldown: {initialData.daysRemaining || 14}d left
+          {isCompleted && (initialData?.cooldownActive || !initialData?.survey_cooldown_override) && !initialData?.survey_cooldown_override && (
+            <span className="text-[11px] text-slate-400 font-medium px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 flex items-center gap-1.5">
+              <Lock size={12} className="text-slate-500" />
+              Locked
             </span>
           )}
 
@@ -160,44 +160,49 @@ export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted,
           {isCompleted && !isEditing && (
             <button
               type="button"
-              onClick={() => (!initialData?.cooldownActive || isAllInterventionsDone) && setIsEditing(true)}
-              disabled={Boolean(initialData?.cooldownActive && !isAllInterventionsDone)}
+              onClick={() => initialData?.survey_cooldown_override && setIsEditing(true)}
+              disabled={!initialData?.survey_cooldown_override}
               title={
-                initialData?.cooldownActive && !isAllInterventionsDone
-                  ? `Survey cooldown active: ${initialData.daysRemaining || 14} days remaining before you can update self-assessment.`
-                  : isAllInterventionsDone
-                  ? 'All interventions completed: Click to retake survey'
-                  : 'Update Self-Assessment'
+                !initialData?.survey_cooldown_override
+                  ? 'Survey Status: Completed. Retake locked until explicitly authorized by your faculty teacher.'
+                  : 'Teacher authorized re-survey: Click to retake self-assessment'
               }
               className={`border text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
-                initialData?.cooldownActive && !isAllInterventionsDone
+                !initialData?.survey_cooldown_override
                   ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed opacity-60'
-                  : isAllInterventionsDone
-                  ? 'bg-emerald-600/30 hover:bg-emerald-600/40 border-emerald-500/50 text-emerald-300 cursor-pointer shadow-sm active:scale-95'
-                  : 'bg-indigo-600/20 hover:bg-indigo-600/30 border-indigo-500/40 text-indigo-300 cursor-pointer'
+                  : 'bg-emerald-600/30 hover:bg-emerald-600/40 border-emerald-500/50 text-emerald-300 cursor-pointer shadow-sm active:scale-95'
               }`}
             >
-              {isAllInterventionsDone ? <Sparkles size={14} className="text-emerald-400" /> : <Edit3 size={14} />}
-              {isAllInterventionsDone ? 'Retake Survey' : 'Update Self-Assessment'}
+              {initialData?.survey_cooldown_override ? (
+                <>
+                  <Sparkles size={14} className="text-emerald-400" />
+                  <span>Retake Survey</span>
+                </>
+              ) : (
+                <>
+                  <Lock size={14} className="text-slate-500" />
+                  <span>Retake Locked</span>
+                </>
+              )}
             </button>
           )}
         </div>
       </div>
 
-      {/* Interventions Completed Banner */}
-      {isAllInterventionsDone && (
-        <div className="p-3.5 bg-emerald-950/50 border border-emerald-500/40 rounded-lg text-xs text-emerald-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+      {/* Teacher-Authorized Re-survey Notification Banner */}
+      {initialData?.survey_cooldown_override && (
+        <div className="p-3.5 bg-emerald-950/60 border border-emerald-500/50 rounded-lg text-xs text-emerald-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md animate-in fade-in duration-200">
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="shrink-0 text-emerald-400" />
             <span>
-              All assigned remedial interventions completed! Cooldown bypassed. You can now re-submit your survey to clear your risk profile.
+              Faculty teacher has authorized an updated self-assessment survey. You can now retake your survey.
             </span>
           </div>
           {!isEditing && (
             <button
               type="button"
               onClick={() => setIsEditing(true)}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer shadow transition active:scale-95 flex items-center gap-1.5"
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer shadow transition active:scale-95 flex items-center gap-1.5"
             >
               <Sparkles size={13} />
               <span>Retake Survey Now</span>
@@ -206,21 +211,13 @@ export default function StudentSurveyForm({ initialData = {}, onSurveySubmitted,
         </div>
       )}
 
-      {/* Override Notice if teacher requested re-survey */}
-      {initialData?.survey_cooldown_override && !isAllInterventionsDone && (
-        <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
-          <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
-          <span>Faculty teacher has requested an updated self-assessment. Cooldown override active.</span>
-        </div>
-      )}
-
-      {/* Cooldown Active Information Banner */}
-      {initialData?.cooldownActive && !isAllInterventionsDone && !isEditing && (
-        <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-lg text-xs text-amber-300 flex items-center justify-between">
+      {/* Cooldown Active Information Banner when NOT authorized by teacher */}
+      {isCompleted && !initialData?.survey_cooldown_override && !isEditing && (
+        <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg text-xs text-slate-400 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Clock size={15} className="shrink-0 text-amber-400" />
+            <Lock size={14} className="shrink-0 text-slate-500" />
             <span>
-              14-day re-assessment cooldown active ({initialData.daysRemaining || 14} days remaining). Your answers are locked until the cycle finishes or faculty requests a re-submission.
+              Survey Status: Completed. Re-assessment is locked until a faculty teacher reviews your remedial progress and authorizes a re-survey.
             </span>
           </div>
         </div>

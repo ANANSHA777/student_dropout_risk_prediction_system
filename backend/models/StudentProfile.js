@@ -57,6 +57,15 @@ const studentProfileSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    resurvey_status: {
+      type: String,
+      enum: ['NONE', 'AUTHORIZED', 'RESUBMITTED', 'EVALUATED'],
+      default: 'NONE',
+    },
+    survey_resubmitted: {
+      type: Boolean,
+      default: false,
+    },
 
     // --- FLAT SURVEY FIELDS ---
     academicInterest: { 
@@ -195,8 +204,16 @@ const studentProfileSchema = new mongoose.Schema(
         'REQUESTED',
         'REJECTED',
         'Rejected',
+        'NOT_REQUESTED',
+        'None',
+        'NONE',
       ],
-      default: 'Paid',
+      default: 'NOT_REQUESTED',
+    },
+    financial_aid_status: {
+      type: String,
+      enum: ['NOT_REQUESTED', 'PENDING', 'REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED', 'REJECTED', 'NONE'],
+      default: 'NOT_REQUESTED',
     },
     financialAidGrant: {
       amount: { type: Number, default: 0 },
@@ -331,6 +348,9 @@ const studentProfileSchema = new mongoose.Schema(
         'Academic Risk Only',
         'Personal / Financial Risk',
         'No Policy Risk',
+        'High Risk (Personal / Wellness)',
+        'Medium Risk (Personal)',
+        'Personal / Wellness',
       ],
       default: 'NONE',
       index: true,

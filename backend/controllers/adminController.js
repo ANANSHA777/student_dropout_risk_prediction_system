@@ -343,11 +343,13 @@ const updateFinancialReliefStatus = async (req, res) => {
     profile.financial_relief_status = sanitizedStatus;
     if (sanitizedStatus === 'APPROVED') {
       profile.financialAidStatus = 'Approved';
+      profile.financial_aid_status = 'APPROVED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Approved';
       profile.collegeFinancialAid.approvedAt = new Date();
     } else if (sanitizedStatus === 'DISBURSED') {
       profile.financialAidStatus = 'Disbursed';
+      profile.financial_aid_status = 'DISBURSED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Approved';
       if (!profile.collegeFinancialAid.approvedAt) {
@@ -355,18 +357,22 @@ const updateFinancialReliefStatus = async (req, res) => {
       }
     } else if (sanitizedStatus === 'REJECTED') {
       profile.financialAidStatus = 'Rejected';
+      profile.financial_aid_status = 'REJECTED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Rejected';
     } else if (sanitizedStatus === 'DOCUMENTS_REQUIRED') {
       profile.financialAidStatus = 'DOCUMENTS_REQUIRED';
+      profile.financial_aid_status = 'DOCUMENTS_REQUIRED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Pending Review';
     } else if (sanitizedStatus === 'DOCUMENTS_SUBMITTED') {
       profile.financialAidStatus = 'DOCUMENTS_SUBMITTED';
+      profile.financial_aid_status = 'DOCUMENTS_SUBMITTED';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Pending Review';
     } else if (sanitizedStatus === 'REQUESTED') {
       profile.financialAidStatus = 'REQUESTED';
+      profile.financial_aid_status = 'PENDING';
       if (!profile.collegeFinancialAid) profile.collegeFinancialAid = {};
       profile.collegeFinancialAid.status = 'Pending Institutional Support';
     }
@@ -412,6 +418,7 @@ const updateFinancialReliefStatus = async (req, res) => {
       await User.findByIdAndUpdate(profile.user, {
         financial_relief_status: sanitizedStatus,
         financialAidStatus: profile.financialAidStatus,
+        financial_aid_status: profile.financial_aid_status,
       });
     }
 

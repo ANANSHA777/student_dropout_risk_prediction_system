@@ -261,9 +261,10 @@ const TeacherDashboard = () => {
     setIsDetailModalOpen(true);
   };
 
-  // Open Financial Aid / College Fund Modal (switched directly to Emergency Relief tab)
+  // Open Financial Aid / College Fund Modal
   const handleOpenFinancialAidModal = (student) => {
-    handleOpenDetailModal(student, 'actions');
+    setSelectedStudentForAid(student);
+    setIsFinancialAidModalOpen(true);
   };
 
   // Mark Academic Remedial Plan as Completed
@@ -296,6 +297,8 @@ const TeacherDashboard = () => {
         setSelectedStudentForDetail((prev) => ({
           ...prev,
           financialAidStatus: 'Pending Institutional Support',
+          financial_relief_status: 'REQUESTED',
+          financial_aid_status: 'PENDING',
           collegeFinancialAid: { ...(prev?.collegeFinancialAid || {}), status: 'Pending Institutional Support' },
         }));
       }

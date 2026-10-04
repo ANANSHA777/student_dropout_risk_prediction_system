@@ -124,21 +124,35 @@ exports.evaluateStudentRisk = async (req, res) => {
     profile.lastAiAnalysisDate = new Date();
     profile.evaluation_source = 'AUTOMATED_AI';
 
+    const isReevaluation = profile.resurvey_status === 'RESUBMITTED' || profile.survey_resubmitted;
+    if (isReevaluation) {
+      profile.resurvey_status = 'EVALUATED';
+      profile.survey_resubmitted = true;
+    }
+
     if (!profile.intervention_logs) profile.intervention_logs = [];
     profile.intervention_logs.push({
-      action: `AI Risk Evaluated: ${assessment.riskLevel}`,
-      performed_by: req.user?.name || req.user?.role || 'System / AI',
+      action: isReevaluation ? `AI Risk Re-evaluated: ${assessment.riskLevel}` : `AI Risk Evaluated: ${assessment.riskLevel}`,
+      performed_by: req.user?.name || req.user?.role || 'Teacher / AI',
       timestamp: new Date(),
-      notes: `Evaluated Case: ${assessment.evaluationCase}. Category: ${assessment.riskCategory}. Role: ${assessment.assignedRole}`,
+      notes: isReevaluation
+        ? `Teacher re-evaluation executed after re-survey. Result: ${assessment.riskLevel}. Case: ${assessment.evaluationCase}. Category: ${assessment.riskCategory}.`
+        : `Evaluated Case: ${assessment.evaluationCase}. Category: ${assessment.riskCategory}. Role: ${assessment.assignedRole}`,
     });
 
-    // Automated Workflow for Case B: Mark status as "Pending Institutional Support"
+    // Automated Workflow for Case B: Financial Stress
     if (assessment.evaluationCase === 'CASE_B_FINANCIAL_STRESS') {
-      profile.financialAidStatus = 'Pending Institutional Support';
-      profile.financial_relief_status = 'REQUESTED';
-      profile.collegeFinancialAid.status = 'Pending Institutional Support';
-      if (!profile.collegeFinancialAid.appliedAt) {
-        profile.collegeFinancialAid.appliedAt = new Date();
+      const existingStatus = (profile.financial_relief_status || '').toUpperCase();
+      const existingAid = (profile.financialAidStatus || '').toUpperCase();
+      const isAlreadyEngaged =
+        ['REQUESTED', 'PENDING', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED', 'REJECTED'].includes(existingStatus) ||
+        ['APPROVED', 'DISBURSED', 'REJECTED', 'PENDING INSTITUTIONAL SUPPORT'].includes(existingAid);
+
+      if (!isAlreadyEngaged) {
+        // AI Risk Evaluation detects financial distress, but status defaults strictly to NOT_REQUESTED / NONE
+        // until the faculty explicitly initiates the emergency college fund application via [ $ Request Fund ]
+        profile.financial_relief_status = 'NONE';
+        profile.financial_aid_status = 'NOT_REQUESTED';
       }
     }
 
@@ -370,8 +384,15 @@ exports.grantFinancialAid = async (req, res) => {
     }
 
     const grantAmount = Number(amount) || 5000;
+    const isAppeal = Boolean(req.body.isAppeal || (profile.financial_relief_status || '').toUpperCase() === 'REJECTED');
+    const actionLabel = isAppeal ? 'Financial Relief Appeal Submitted' : 'College Fund Requested';
+    const logNotes = notes || (isAppeal
+      ? `Re-appealed for Emergency College Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Hardship Support'}. Re-submitted for administrative reconsideration.`
+      : `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: Pending institutional review.`);
+
     profile.financialAidStatus = 'Pending Institutional Support';
     profile.financial_relief_status = 'REQUESTED';
+    profile.financial_aid_status = 'PENDING';
     profile.collegeFinancialAid = {
       status: 'Pending Institutional Support',
       grantAmount,
@@ -381,31 +402,36 @@ exports.grantFinancialAid = async (req, res) => {
 
     profile.qualitativeNotes.push({
       authorRole: req.user?.role || 'Teacher',
-      note: `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: ${notes || 'Pending institutional review.'}`,
+      note: logNotes,
       category: 'Financial',
       createdAt: new Date(),
     });
 
     if (!profile.intervention_logs) profile.intervention_logs = [];
     profile.intervention_logs.push({
-      action: 'College Fund Requested',
+      action: actionLabel,
       performed_by: req.user?.name || req.user?.role || 'Teacher',
       timestamp: new Date(),
-      notes: `Requested College Emergency Fund Grant of ₹${grantAmount}. Reason: ${reason || 'Tuition / Living Support'}. Notes: ${notes || 'Pending institutional review.'}`,
+      notes: logNotes,
     });
 
     await profile.save();
 
-    await User.findByIdAndUpdate(profile.user, {
-      $set: {
-        financialAidStatus: 'Pending Institutional Support',
-        financial_relief_status: 'REQUESTED',
-      },
-    });
+    if (profile.user) {
+      await User.findByIdAndUpdate(profile.user, {
+        $set: {
+          financialAidStatus: 'Pending Institutional Support',
+          financial_relief_status: 'REQUESTED',
+          financial_aid_status: 'PENDING',
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'College Fund Request submitted. Student marked as "Pending Institutional Support".',
+      message: isAppeal
+        ? 'Financial relief appeal submitted successfully. Student marked as "Pending Institutional Support".'
+        : 'College Fund Request submitted. Student marked as "Pending Institutional Support".',
       financialAidStatus: profile.financialAidStatus,
       financial_relief_status: profile.financial_relief_status,
       collegeFinancialAid: profile.collegeFinancialAid,

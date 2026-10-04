@@ -186,9 +186,20 @@ function evaluateNonAcademicCategories(data = {}) {
 function evaluateDecisionMatrix(data, nonAcademic) {
   const cgpa = Number(data.cgpa ?? data.latestMarks ?? 0);
   const attendance = Number(data.attendancePercentage ?? data.attendance ?? 100);
-  const backlogs = String(data.activeBacklogs || '');
-  const isBacklogPresent = backlogs.includes('1') || backlogs.includes('2') || backlogs.includes('3') || backlogs.includes('backlog');
-  const isAcademicIssue = cgpa < 6.5 || attendance < 75 || isBacklogPresent;
+  const backlogs = String(data.activeBacklogs || '').toLowerCase();
+  
+  // Proper backlog parsing: Only count positive backlog numbers, never '0 Backlogs' or 'No Backlogs'
+  const hasActiveBacklogs = (
+    backlogs.includes('1') ||
+    backlogs.includes('2') ||
+    backlogs.includes('3') ||
+    backlogs.includes('4') ||
+    backlogs.includes('5')
+  ) && !backlogs.includes('0 backlog') && !backlogs.includes('0 backlogs') && !backlogs.startsWith('0') && !backlogs.includes('no');
+
+  // Academic thresholds: CGPA < 6.0 and Attendance < 75%
+  const bothAcademicThresholdsFailed = cgpa < 6.0 && attendance < 75;
+  const isAcademicIssue = cgpa < 6.0 || attendance < 75 || hasActiveBacklogs;
 
   const { raw, wellness, disengagement, financial } = nonAcademic;
 
@@ -200,8 +211,15 @@ function evaluateDecisionMatrix(data, nonAcademic) {
 
   if (isCaseA) {
     const isSevere = wellness.level === 'High' || disengagement.level === 'High';
-    const riskLevel = isSevere ? 'High Risk' : 'Medium Risk';
-    const riskCategory = wellness.score >= disengagement.score ? 'Wellness & Mental Health' : 'Academic Disengagement';
+
+    // Criteria Correction (e.g., John):
+    // Dual Risk MUST ONLY be assigned if BOTH academic thresholds fail AND non-academic stressors are present.
+    // If student meets academic thresholds (CGPA >= 6.0 and Attendance >= 75%), classify strictly as
+    // 'High Risk (Personal / Wellness)' or 'Medium Risk (Personal)', NOT Dual Risk.
+    const riskLevel = bothAcademicThresholdsFailed ? 'Dual Risk' : (isSevere ? 'High Risk' : 'Medium Risk');
+    const riskCategory = bothAcademicThresholdsFailed
+      ? 'Dual Risk (Academic + Personal)'
+      : (isSevere ? 'High Risk (Personal / Wellness)' : 'Medium Risk (Personal)');
     const primaryRiskCategory = wellness.score >= disengagement.score ? 'WELLNESS' : 'DISENGAGEMENT';
 
     return {
@@ -246,6 +264,8 @@ function evaluateDecisionMatrix(data, nonAcademic) {
       riskCategory: 'Financial Strain',
       primaryRiskCategory: 'FINANCIAL',
       assignedRole: 'FINANCIAL_AID',
+      financial_aid_status: 'NOT_REQUESTED',
+      financial_relief_status: 'NONE',
       nonAcademicRisk: { wellness, disengagement, financial },
       recommendedActions: {
         assignCounselor: false,
@@ -349,8 +369,10 @@ NON-ACADEMIC CATEGORIES:
 3. Financial / External Stressors (inability to afford tuition/books, fee worries, commute)
 
 DECISION MATRIX RULES:
+- If a student meets academic thresholds (CGPA >= 6.0 and Attendance >= 75%) with NO backlogs, they have NO academic risk. If they report personal/wellness flags, classify them strictly as "High Risk (Personal / Wellness)" or "Medium Risk (Personal)" under assignedRole "COUNSELOR". DO NOT classify as Dual Risk.
+- Dual Risk (Academic + Personal) MUST ONLY be assigned if BOTH academic thresholds fail (CGPA < 6.0 or Attendance < 75%) AND non-academic stressors are present.
 - CASE A: Lack of Interest due to Non-Academic Reasons / Mental Health / Disengagement:
-  Must assign role "COUNSELOR", set primaryRiskCategory to "WELLNESS" or "DISENGAGEMENT", and specify strict isolation (do NOT assign academic penalty plan).
+  Must assign role "COUNSELOR", set riskCategory to "High Risk (Personal / Wellness)" or "Medium Risk (Personal)", and specify strict isolation (do NOT assign academic penalty plan).
 - CASE B: Student has Interest, but cannot study due to Financial Issues:
   Must assign role "FINANCIAL_AID", set primaryRiskCategory to "FINANCIAL", recommend College Fund Allocation and "Pending Institutional Support".
 - CASE C: Purely Academic Issues (Low CGPA/attendance/backlogs with NO major non-academic distress):
@@ -374,11 +396,14 @@ ${JSON.stringify(studentData, null, 2)}
             },
             riskLevel: {
               type: 'STRING',
-              enum: ['High Risk', 'Medium Risk', 'Low Risk'],
+              enum: ['High Risk', 'Medium Risk', 'Low Risk', 'Dual Risk'],
             },
             riskCategory: {
               type: 'STRING',
               enum: [
+                'High Risk (Personal / Wellness)',
+                'Medium Risk (Personal)',
+                'Dual Risk (Academic + Personal)',
                 'Wellness & Mental Health',
                 'Academic Disengagement',
                 'Financial Strain',
@@ -388,7 +413,17 @@ ${JSON.stringify(studentData, null, 2)}
             },
             primaryRiskCategory: {
               type: 'STRING',
-              enum: ['WELLNESS', 'DISENGAGEMENT', 'FINANCIAL', 'ACADEMIC', 'NONE'],
+              enum: [
+                'High Risk (Personal / Wellness)',
+                'Medium Risk (Personal)',
+                'Dual Risk (Academic + Personal)',
+                'WELLNESS',
+                'DISENGAGEMENT',
+                'FINANCIAL',
+                'ACADEMIC',
+                'DUAL',
+                'NONE',
+              ],
             },
             assignedRole: {
               type: 'STRING',

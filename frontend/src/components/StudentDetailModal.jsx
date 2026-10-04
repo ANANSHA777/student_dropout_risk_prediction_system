@@ -25,6 +25,7 @@ import {
   Info,
   XCircle,
   Download,
+  RotateCcw,
 } from 'lucide-react';
 import { requestCollegeFund } from '../services/teacherService';
 import { updateFinancialReliefStatus } from '../services/adminService';
@@ -54,6 +55,13 @@ export function StudentDetailsModal({
   const [isSubmittingFund, setIsSubmittingFund] = useState(false);
   const [fundFeedback, setFundFeedback] = useState(null);
 
+  // Financial Relief Appeal states (for rejected requests)
+  const [showAppealForm, setShowAppealForm] = useState(false);
+  const [appealAmount, setAppealAmount] = useState('5000');
+  const [appealCategory, setAppealCategory] = useState('Tuition & Hardship Relief (Appeal)');
+  const [appealNotes, setAppealNotes] = useState('');
+  const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
+
   // Admin Approval Hub states
   const [adminReliefNotes, setAdminReliefNotes] = useState('');
   const [isAdminUpdatingRelief, setIsAdminUpdatingRelief] = useState(false);
@@ -66,6 +74,11 @@ export function StudentDetailsModal({
     if (student) {
       setLocalReliefStatus(student.financial_relief_status || student.financialAidStatus || 'NONE');
       setLocalLogs(student.intervention_logs || []);
+      const prevAmount = student.collegeFinancialAid?.grantAmount || student.collegeFinancialAid?.amount || student.requestedFundAmount || 5000;
+      setAppealAmount(String(prevAmount));
+      setAppealCategory(student.collegeFinancialAid?.reason || 'Tuition & Hardship Relief (Appeal)');
+      setShowAppealForm(false);
+      setAppealNotes('');
     }
     if (initialTab) {
       setActiveTab(initialTab);
@@ -217,6 +230,57 @@ export function StudentDetailsModal({
       setFundFeedback(`Error: ${err.message}`);
     } finally {
       setIsSubmittingFund(false);
+    }
+  };
+
+  const rejectionLog = (localLogs || [])
+    .slice()
+    .reverse()
+    .find((l) => {
+      const act = String(l.action || '').toLowerCase();
+      const nts = String(l.notes || '').toLowerCase();
+      return act.includes('reject') || nts.includes('reject');
+    });
+
+  const rejectionReason =
+    rejectionLog?.notes ||
+    student.rejection_notes ||
+    student.financial_relief_rejection_reason ||
+    'Emergency relief application rejected following administrative review.';
+  const rejectedBy = rejectionLog?.performed_by || 'Administration';
+  const rejectedDate = rejectionLog?.timestamp || null;
+
+  const handleAppealSubmit = async (e) => {
+    e.preventDefault();
+    setIsSubmittingAppeal(true);
+    setFundFeedback(null);
+    try {
+      const finalAmount = Number(appealAmount) || 5000;
+      const finalReason = appealCategory || 'Tuition & Hardship Relief (Appeal)';
+      const finalNotes = appealNotes || 'Faculty submitted financial relief re-appeal following initial administrative rejection.';
+
+      await requestCollegeFund(studentId, {
+        amount: finalAmount,
+        reason: finalReason,
+        notes: `[FACULTY APPEAL] ${finalNotes}`,
+        isAppeal: true,
+      });
+
+      setLocalReliefStatus('REQUESTED');
+      setShowAppealForm(false);
+      const newEntry = {
+        action: 'Financial Relief Appeal Submitted',
+        performed_by: user?.name || 'Faculty / Teacher',
+        timestamp: new Date().toISOString(),
+        notes: `Re-appeal for ₹${finalAmount}: ${finalNotes}`,
+      };
+      setLocalLogs((prev) => [newEntry, ...prev]);
+      setFundFeedback('Financial relief appeal submitted successfully. Status updated to "REQUESTED" (Under Admin Review).');
+      if (onUpdateSuccess) onUpdateSuccess();
+    } catch (err) {
+      setFundFeedback(`Error submitting appeal: ${err.message}`);
+    } finally {
+      setIsSubmittingAppeal(false);
     }
   };
 
@@ -917,6 +981,31 @@ export function StudentDetailsModal({
                               No financial relief or grant applications submitted
                             </div>
                           )}
+
+                          {isRejected && (
+                            <div className="pt-2 border-t border-rose-900/40 space-y-1.5">
+                              <div className="text-[11px] text-rose-300 font-semibold flex items-center gap-1">
+                                <XCircle size={12} className="text-rose-400 shrink-0" />
+                                <span>Rejection Notice from Administration:</span>
+                              </div>
+                              <p className="text-rose-200/90 italic text-[11px] leading-relaxed bg-rose-950/40 p-2 rounded border border-rose-900/40">
+                                "{rejectionReason}"
+                              </p>
+                              {!isAdmin && !isCounselor && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveTab('actions');
+                                    setShowAppealForm(true);
+                                  }}
+                                  className="w-full mt-1 px-2.5 py-1.5 bg-rose-900/50 hover:bg-rose-800/70 text-rose-200 border border-rose-700/60 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                                >
+                                  <RotateCcw size={11} />
+                                  <span>Re-request Financial Aid / Submit Appeal</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1422,6 +1511,147 @@ export function StudentDetailsModal({
                       <span>•</span>
                       <span>Financial Stress: <strong className="text-slate-300">{financialStress}</strong></span>
                     </div>
+                  </div>
+                ) : normalizedStatus === 'REJECTED' ? (
+                  /* TEACHER VIEW FOR REJECTED RELIEF WITH RE-APPEAL OPTION */
+                  <div className="bg-slate-950/80 rounded-xl border border-rose-800/40 p-5 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-rose-950/80 border border-rose-700/60 flex items-center justify-center shrink-0 text-rose-400">
+                        <XCircle size={20} />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <span>Emergency Relief Request Rejected by Administration</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-950/80 text-rose-300 border border-rose-500/40">
+                            REJECTED
+                          </span>
+                        </h4>
+                        <p className="text-xs text-rose-300/80">
+                          Administrative leadership reviewed and declined the previous institutional fund request for this student.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Admin Rejection Remarks & Context */}
+                    <div className="bg-rose-950/20 border border-rose-900/50 rounded-lg p-3.5 space-y-2 text-xs">
+                      <div className="flex justify-between items-center text-[11px] text-slate-400 flex-wrap gap-2">
+                        <span className="font-semibold text-rose-300">Administrative Decision Remarks:</span>
+                        <span className="font-mono text-slate-400 text-[10px]">
+                          Reviewed by {rejectedBy} {rejectedDate ? `• ${formatDate(rejectedDate)}` : ''}
+                        </span>
+                      </div>
+                      <p className="text-slate-200 italic leading-relaxed text-xs">
+                        "{rejectionReason}"
+                      </p>
+                    </div>
+
+                    {/* Previous Request Details Summary */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <span className="text-slate-500 block text-[11px]">Previous Request Amount</span>
+                        <span className="text-sm font-bold text-slate-300">₹{requestedAmountFormatted}</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <span className="text-slate-500 block text-[11px]">Category</span>
+                        <span className="text-xs font-semibold text-slate-300 truncate block">{requestedCategory}</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <span className="text-slate-500 block text-[11px]">Previous Status</span>
+                        <span className="text-xs font-bold text-rose-400">Closed / Declined</span>
+                      </div>
+                    </div>
+
+                    {/* Re-appeal action / form */}
+                    {!showAppealForm ? (
+                      <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between flex-wrap gap-3">
+                        <p className="text-xs text-slate-400">
+                          Faculty may submit an institutional appeal with additional hardship documentation or revised terms.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowAppealForm(true)}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
+                        >
+                          <RotateCcw size={13} />
+                          <span>Re-request Financial Aid</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleAppealSubmit} className="space-y-4 pt-3 border-t border-slate-800 text-xs">
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+                          <RotateCcw size={14} />
+                          <span>Submit Financial Appeal for Administrative Reconsideration</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1">Requested Fund Amount (₹ / $)</label>
+                            <input
+                              type="number"
+                              required
+                              value={appealAmount}
+                              onChange={(e) => setAppealAmount(e.target.value)}
+                              placeholder="e.g. 5000"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1">Support Category</label>
+                            <input
+                              type="text"
+                              required
+                              value={appealCategory}
+                              onChange={(e) => setAppealCategory(e.target.value)}
+                              placeholder="e.g. Tuition fee grant / Book allowance"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-300 font-semibold mb-1">
+                            Faculty Appeal Justification & Updated Documentation Notes
+                          </label>
+                          <textarea
+                            required
+                            rows={3}
+                            value={appealNotes}
+                            onChange={(e) => setAppealNotes(e.target.value)}
+                            placeholder="Detail why administrative leadership should reconsider this relief application (e.g., student provided updated income declaration, tuition arrears critical, fee deadline approaching)..."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 text-xs"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowAppealForm(false)}
+                            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="submit"
+                            disabled={isSubmittingAppeal}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95 shadow-lg"
+                          >
+                            {isSubmittingAppeal ? (
+                              <>
+                                <Loader2 size={13} className="animate-spin" />
+                                <span>Submitting Appeal...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send size={13} />
+                                <span>Submit Financial Appeal</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 ) : normalizedStatus !== 'NONE' ? (
                   /* TEACHER VIEW WHEN REQUEST ALREADY EXISTS */

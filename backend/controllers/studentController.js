@@ -145,25 +145,26 @@ exports.getStudentProfile = async (req, res) => {
     const acadDone = !hasAcadPlan || acadStatus === 'COMPLETED';
 
     const hasCounselor = Boolean(profile.assigned_counselor_id || profile.assignedCounselor);
-    const counselingStatus = (profile.counseling_session?.status || '').toUpperCase();
-    const counselorDone = !hasCounselor || counselingStatus === 'COMPLETED';
+    const counselingStatus = (profile.counseling_session?.status || profile.counselingStatus || '').toUpperCase();
+    const counselorDone = !hasCounselor || counselingStatus === 'COMPLETED' || counselingStatus === 'RESOLVED';
 
-    const fStatus = (profile.financial_relief_status || '').toUpperCase();
-    const hasFinancial = fStatus !== 'NONE' && fStatus !== '';
-    const financialDone = !hasFinancial || fStatus === 'APPROVED' || fStatus === 'DISBURSED';
+    const fStatus = (profile.financial_relief_status || profile.financialAidStatus || '').toUpperCase();
+    const hasFinancial = fStatus !== 'NONE' && fStatus !== 'NOT_REQUESTED' && fStatus !== '';
+    const financialDone = !hasFinancial || fStatus === 'DISBURSED';
 
-    const hadIntervention = (acadStatus === 'COMPLETED' || counselingStatus === 'COMPLETED' || fStatus === 'APPROVED' || fStatus === 'DISBURSED');
+    const hadIntervention = (acadStatus === 'COMPLETED' || counselingStatus === 'COMPLETED' || counselingStatus === 'RESOLVED' || fStatus === 'DISBURSED');
     const allInterventionsDone = Boolean(hadIntervention && acadDone && counselorDone && financialDone);
 
     // Determine 14-day cooldown status
+    // Requirement: A student MUST NOT be able to retake survey unless teacher explicitly authorized
     const cooldownPeriodMs = 14 * 24 * 60 * 60 * 1000;
     const lastSubmission = profile.last_survey_submission_date || profile.lastSurveySubmittedAt;
     let cooldownActive = false;
     let daysRemaining = 0;
-    if (lastSubmission && !profile.survey_cooldown_override && !allInterventionsDone) {
+    if (lastSubmission && !profile.survey_cooldown_override) {
+      cooldownActive = true;
       const elapsed = Date.now() - new Date(lastSubmission).getTime();
       if (elapsed < cooldownPeriodMs) {
-        cooldownActive = true;
         daysRemaining = Math.ceil((cooldownPeriodMs - elapsed) / (24 * 60 * 60 * 1000));
       }
     }
@@ -182,6 +183,9 @@ exports.getStudentProfile = async (req, res) => {
         daysRemaining,
         allInterventionsCompleted: allInterventionsDone,
         survey_cooldown_override: Boolean(profile.survey_cooldown_override),
+        resurvey_authorized: Boolean(profile.survey_cooldown_override),
+        resurvey_status: profile.resurvey_status || 'NONE',
+        survey_resubmitted: Boolean(profile.survey_resubmitted),
         last_survey_submission_date: lastSubmission,
         riskLevel: profile.riskLevel || 'Unevaluated',
         riskCategory: cleanCategory,
@@ -265,17 +269,12 @@ exports.submitStudentSurvey = async (req, res) => {
       const hadIntervention = (acadStatus === 'COMPLETED' || counselingStatus === 'COMPLETED' || fStatus === 'APPROVED' || fStatus === 'DISBURSED');
       const allInterventionsDone = Boolean(hadIntervention && acadDone && counselorDone && financialDone);
 
-      if (lastSubmission && !existingProfile.survey_cooldown_override && !allInterventionsDone) {
-        const elapsed = Date.now() - new Date(lastSubmission).getTime();
-        if (elapsed < cooldownPeriodMs) {
-          const daysRemaining = Math.ceil((cooldownPeriodMs - elapsed) / (24 * 60 * 60 * 1000));
-          return res.status(429).json({
-            success: false,
-            message: `14-Day Survey Cooldown Active: You may re-submit in ${daysRemaining} day(s). Contact a teacher for re-submission bypass if needed.`,
-            cooldownActive: true,
-            daysRemaining,
-          });
-        }
+      if (lastSubmission && !existingProfile.survey_cooldown_override) {
+        return res.status(403).json({
+          success: false,
+          message: 'Survey re-submission is locked. You must be explicitly authorized by your teacher on their roster to retake the self-assessment.',
+          cooldownActive: true,
+        });
       }
     }
 
@@ -314,13 +313,17 @@ exports.submitStudentSurvey = async (req, res) => {
       impactFactors: cleanImpactFactors,
     };
 
+    const isResurvey = Boolean(existingProfile && (existingProfile.surveyCompleted || existingProfile.last_survey_submission_date));
+
     // Prepare profile update payload (Pure survey save without auto-evaluating risk)
     const updateData = {
       surveyCompleted: true,
       surveyStatus: 'Completed',
       lastSurveySubmittedAt: new Date(),
       last_survey_submission_date: new Date(),
-      survey_cooldown_override: false,
+      survey_cooldown_override: false, // Re-lock student re-survey until re-authorized
+      resurvey_status: isResurvey ? 'RESUBMITTED' : 'NONE',
+      survey_resubmitted: isResurvey,
 
       // Flat Survey Fields (For direct query access)
       academicInterest,
@@ -348,72 +351,33 @@ exports.submitStudentSurvey = async (req, res) => {
       surveyData: surveyDataObject,
     };
 
-    // Post-intervention recovery check:
-    // If student had interventions assigned and they reached COMPLETED,
-    // and new survey inputs are healthy (positive motivation, balanced wellness, no severe financial stress),
-    // and academic marks meet threshold (CGPA >= 6.0 and Attendance >= 75%),
-    // recover risk profile to Low Risk / Normal.
-    let isRecovered = false;
-    let recoveryLog = null;
-
+    // Persist existing evaluated risk tier without premature "Low Risk" update.
+    // The student's evaluated risk tier MUST be preserved until the Teacher explicitly executes the re-evaluation via [ Re-evaluate ].
     if (existingProfile) {
-      const acadPlanStatus = (existingProfile.academic_remedial_plan?.status || (existingProfile.assignedAcademicPlan ? 'IN_PROGRESS' : 'NOT_REQUIRED')).toUpperCase();
-      const cStatus = (existingProfile.counseling_session?.status || '').toUpperCase();
-      const hasAssignedCounselor = Boolean(existingProfile.assigned_counselor_id || existingProfile.assignedCounselor);
-      
-      const academicDoneOrNotNeeded = acadPlanStatus === 'COMPLETED' || acadPlanStatus === 'NOT_REQUIRED';
-      const counselingDoneOrNotNeeded = !hasAssignedCounselor || cStatus === 'COMPLETED';
-      const hasInterventionHistory = acadPlanStatus === 'COMPLETED' || cStatus === 'COMPLETED' || existingProfile.riskEvaluated;
-
-      const cgpa = existingProfile.cgpa !== null && existingProfile.cgpa !== undefined ? existingProfile.cgpa : 8.0;
-      const attendance = existingProfile.attendancePercentage !== null && existingProfile.attendancePercentage !== undefined ? existingProfile.attendancePercentage : 80;
-
-      const interestLower = String(academicInterest).toLowerCase();
-      const mentalLower = String(mentalHealthStatus).toLowerCase();
-      const financialLower = String(financialStress).toLowerCase();
-      const backlogsLower = String(activeBacklogs).toLowerCase();
-
-      const healthyInterest = !interestLower.includes('low') && !interestLower.includes('disengaged') && !interestLower.includes('lost');
-      const healthyMental = !['depressed', 'overwhelmed', 'anxious', 'severe', 'crisis', 'critical', 'bad', 'poor'].some(w => mentalLower.includes(w));
-      const healthyFinancial = !['high', 'severe', 'critical'].some(w => financialLower.includes(w));
-      const healthyBacklogs = backlogsLower.includes('0') || backlogsLower.includes('none') || backlogsLower.includes('no');
-      const healthyAcademics = cgpa >= 6.0 && attendance >= 75;
-
-      if (hasInterventionHistory && academicDoneOrNotNeeded && counselingDoneOrNotNeeded && healthyInterest && healthyMental && healthyFinancial && healthyBacklogs && healthyAcademics) {
-        isRecovered = true;
-        updateData.riskLevel = 'Low Risk';
-        updateData.riskCategory = 'None';
-        updateData.primaryRiskCategory = 'NONE';
-        updateData.riskEvaluated = true;
-        updateData.evaluationCase = 'NONE';
-        updateData.riskScore = 15;
-        updateData.lastEvaluatedAt = new Date();
-
-        recoveryLog = {
-          action: 'Post-Intervention Recovery: Low Risk Verified',
-          performed_by: 'System / Re-survey Assessment',
-          timestamp: new Date(),
-          notes: 'Post-intervention self-assessment completed with healthy wellness and engagement indicators. Institutional risk profile recovered to Low Risk / Normal.',
-        };
-      }
+      if (existingProfile.riskLevel) updateData.riskLevel = existingProfile.riskLevel;
+      if (existingProfile.riskCategory) updateData.riskCategory = existingProfile.riskCategory;
+      if (existingProfile.primaryRiskCategory) updateData.primaryRiskCategory = existingProfile.primaryRiskCategory;
+      if (existingProfile.evaluationCase) updateData.evaluationCase = existingProfile.evaluationCase;
+      if (existingProfile.riskEvaluated !== undefined) updateData.riskEvaluated = existingProfile.riskEvaluated;
     }
 
-    // 1. Sync User document completion flag and recovered risk state
+    // 1. Sync User document completion flag (Preserve existing user risk level)
     await User.findByIdAndUpdate(studentId, {
       $set: {
         surveyCompleted: true,
-        ...(isRecovered ? {
-          riskLevel: 'Low Risk',
-          riskCategory: 'None',
-          primaryRiskCategory: 'NONE',
-          riskEvaluated: true,
-        } : {}),
       },
     });
 
     // 2. Persist updated profile document
-    const mongoUpdate = recoveryLog
-      ? { $set: updateData, $push: { intervention_logs: recoveryLog } }
+    const resubmitLog = isResurvey ? {
+      action: 'Survey Re-submitted',
+      performed_by: 'Student',
+      timestamp: new Date(),
+      notes: 'Student retook and submitted updated self-assessment survey. Ready for teacher re-evaluation.',
+    } : null;
+
+    const mongoUpdate = resubmitLog
+      ? { $set: updateData, $push: { intervention_logs: resubmitLog } }
       : { $set: updateData };
 
     const updatedProfile = await StudentProfile.findOneAndUpdate(
@@ -430,13 +394,17 @@ exports.submitStudentSurvey = async (req, res) => {
     // 3. Send normalized payload to prevent state mismatches in React
     res.status(200).json({
       success: true,
-      message: isRecovered
-        ? 'Self-assessment survey recorded successfully. Student risk profile recovered to Low Risk / Normal.'
+      message: isResurvey
+        ? 'Updated self-assessment survey submitted successfully. Pending teacher re-evaluation.'
         : 'Self-assessment survey recorded successfully. Pending teacher AI evaluation.',
       profile: {
         ...updatedProfile,
-        riskLevel: updatedProfile.riskLevel || (isRecovered ? 'Low Risk' : 'Unevaluated'),
-        riskCategory: updatedProfile.riskCategory || (isRecovered ? 'None' : 'None'),
+        riskLevel: updatedProfile.riskLevel || 'Unevaluated',
+        riskCategory: updatedProfile.riskCategory || 'None',
+        primaryRiskCategory: updatedProfile.primaryRiskCategory || 'NONE',
+        evaluationCase: updatedProfile.evaluationCase || 'NONE',
+        resurvey_status: isResurvey ? 'RESUBMITTED' : (updatedProfile.resurvey_status || 'NONE'),
+        survey_resubmitted: isResurvey,
         surveyCompleted: true,
         surveyStatus: 'Completed',
         canEvaluate,

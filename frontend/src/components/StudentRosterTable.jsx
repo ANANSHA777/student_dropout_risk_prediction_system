@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Eye,
   RotateCcw,
+  XCircle,
 } from 'lucide-react';
 
 // --- HELPERS ---
@@ -95,14 +96,20 @@ function evaluateStudentRootCause(student) {
   const attendance = student.attendancePercentage ?? student.attendance ?? null;
   const backlogsStr = getValStr('activeBacklogs', 'backlogs');
 
-  const isAcademicRisk = 
-    (cgpa !== null && cgpa < 7.5) || 
-    (attendance !== null && attendance <= 75) || 
-    backlogsStr.includes('backlog') ||
-    backlogsStr.includes('3+') ||
-    backlogsStr.includes('1') ||
-    backlogsStr.includes('2') ||
-    student.riskCategory === 'Academic Concern';
+  // Proper backlog detection: Only count positive backlog numbers (never 0 Backlogs or No Backlogs)
+  const hasActiveBacklogs = (
+    backlogsStr.includes('1') || 
+    backlogsStr.includes('2') || 
+    backlogsStr.includes('3') || 
+    backlogsStr.includes('4') || 
+    backlogsStr.includes('5')
+  ) && !backlogsStr.includes('0 backlog') && !backlogsStr.includes('0 backlogs') && !backlogsStr.startsWith('0') && !backlogsStr.includes('no');
+
+  // Strict academic thresholds: CGPA < 6.0 and Attendance < 75%
+  // If student meets academic thresholds (CGPA >= 6.0 and Attendance >= 75%), NO Academic Risk!
+  const hasLowCgpa = cgpa !== null && cgpa < 6.0;
+  const hasLowAttendance = attendance !== null && attendance < 75;
+  const isAcademicRisk = hasLowCgpa || hasLowAttendance || hasActiveBacklogs;
 
   // 2. NON-ACADEMIC & PERSONAL RISK EVALUATION
   
@@ -121,18 +128,33 @@ function evaluateStudentRootCause(student) {
   const interestStr = getValStr('academicInterest', 'academic_interest', 'studyInterest', 'interestInStudies');
   const isDisengaged = ['low', 'lost', 'disengaged', 'none', 'no interest'].some(term => interestStr.includes(term));
 
-  // Financial Stress - Strict Gating:
-  // Financial relief is ONLY available if financial_stress == "HIGH" OR familyIncome <= "Below ₹30,000"
-  // For financially stable students (e.g., Arshin: income > ₹60k, moderate anxiety), HIDE Request College Fund
+  // Financial Stress - Comprehensive Detection (e.g. Emu, Arfin):
   const finStressStr = getValStr('financialStress', 'financial_stress', 'feeWorries', 'fee_worries', 'moneyFeeWorries', 'moneyWorries');
   const finIncomeStr = getValStr('familyIncome', 'family_income', 'incomeLevel', 'income_level', 'familyMonthlyIncome');
+  const disengageStr = getValStr('disengagementReason', 'disengagement_reason');
 
+  const isDisengagedFinancial = disengageStr.includes('financial');
   const isHighFinancialStress = ['high', 'severe', 'critical'].some(term => finStressStr.includes(term));
+  const isGeneralFinancialStress = ['high', 'severe', 'critical', 'moderate', 'medium', 'yes', 'stress', 'fee', 'tuition', 'struggling', 'difficult'].some(term => finStressStr.includes(term));
   const isLowIncome = ['below 30', 'below ₹30,000', 'below 30,000', '< 30000', '< 30,000', 'poor', 'poverty', '15,000'].some(term => finIncomeStr.includes(term));
+  const isModestIncome = ['below', '<', '30,000', '50,000', 'poor', 'poverty'].some(term => finIncomeStr.includes(term));
   const isHighIncome = ['above 60', 'above ₹60,000', 'above 60,000', '> 60000', '> 60,000', 'above 1,00,000', 'above 100000'].some(term => finIncomeStr.includes(term));
-  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED'].includes((student.financial_relief_status || '').toUpperCase());
+  const hasExistingReliefRequest = ['REQUESTED', 'DOCUMENTS_REQUIRED', 'DOCUMENTS_SUBMITTED', 'APPROVED', 'DISBURSED'].includes((student.financial_relief_status || '').toUpperCase()) ||
+    ['APPROVED', 'DISBURSED', 'PENDING INSTITUTIONAL SUPPORT'].includes((student.financialAidStatus || '').toUpperCase());
 
-  const hasFinancialIssue = (isHighFinancialStress || isLowIncome || hasExistingReliefRequest) && !(isHighIncome && !isHighFinancialStress);
+  const hasCategoryFinancial = 
+    (student.primaryRiskCategory || '').toUpperCase() === 'FINANCIAL' ||
+    (student.evaluationCase || '').toUpperCase() === 'CASE_B_FINANCIAL_STRESS' ||
+    (student.riskCategory || '').toLowerCase().includes('financial') ||
+    student.nonAcademicRisk?.financial?.level === 'High' ||
+    student.nonAcademicRisk?.financial?.level === 'Medium';
+
+  const hasFinancialIssue = 
+    hasExistingReliefRequest || 
+    hasCategoryFinancial || 
+    isDisengagedFinancial || 
+    isHighFinancialStress || 
+    ((isGeneralFinancialStress || isModestIncome || isLowIncome) && !(isHighIncome && !isHighFinancialStress));
 
   // External Stress (Commute "More than 2 hours" & Self-Study "Less than 1 hour")
   const commuteStr = getValStr('commuteTime', 'dailyCommuteTime', 'travelTime');
@@ -141,16 +163,24 @@ function evaluateStudentRootCause(student) {
   const hasPersonalOrFinancialRisk = hasWellnessIssue || isDisengaged || hasFinancialIssue || hasCommuteIssue;
 
   // Unsuppress Academic Plan for low metrics: CGPA < 6.0 or Attendance < 75%
-  const hasLowAcademicMetrics = (cgpa !== null && cgpa < 6.0) || (attendance !== null && attendance < 75);
+  const hasLowAcademicMetrics = hasLowCgpa || hasLowAttendance;
 
-  // 3. AI MATRIX RISK CATEGORIZATION
+  // 3. AI MATRIX RISK CATEGORIZATION (Strict Separation: Dual Risk requires BOTH academic failure AND personal stressors)
   let riskCategoryClassification = 'No Policy Risk';
   if (isAcademicRisk && hasPersonalOrFinancialRisk) {
     riskCategoryClassification = 'Dual Risk (Academic + Personal)';
   } else if (isAcademicRisk) {
     riskCategoryClassification = 'Academic Risk Only';
   } else if (hasPersonalOrFinancialRisk) {
-    riskCategoryClassification = 'Personal / Financial Risk';
+    if (hasWellnessIssue || isDisengaged) {
+      const isHighWellness = ['depressed', 'overwhelmed', 'severe', 'critical'].some(term => mentalStr.includes(term)) ||
+        student.nonAcademicRisk?.wellness?.level === 'High';
+      riskCategoryClassification = isHighWellness
+        ? 'High Risk (Personal / Wellness)'
+        : 'Medium Risk (Personal)';
+    } else {
+      riskCategoryClassification = 'Personal / Financial Risk';
+    }
   }
 
   return {
@@ -210,11 +240,19 @@ function resolveStudentFields(student) {
     const rawPrimary = (student.primaryRiskCategory || '').trim();
     const rawRisk = (student.riskCategory || '').trim();
 
-    if (
+    // Criteria Correction (e.g. John): If student meets academic thresholds (CGPA >= 6.0 and Attendance >= 75%), NEVER assign Dual Risk
+    const meetsAcademics = (cgpaVal === null || cgpaVal >= 6.0) && (attendanceVal === null || attendanceVal >= 75);
+    const isDualInDb = (rawPrimary.toLowerCase().includes('dual') || rawRisk.toLowerCase().includes('dual'));
+
+    if (meetsAcademics && isDualInDb) {
+      effectiveCategory = evaluationAnalysis.riskCategoryClassification;
+    } else if (
       !rawPrimary || 
       rawPrimary.toUpperCase() === 'NONE' || 
       rawRisk.toLowerCase() === 'academic concern' ||
-      evaluationAnalysis.riskCategoryClassification === 'Dual Risk (Academic + Personal)'
+      evaluationAnalysis.riskCategoryClassification === 'Dual Risk (Academic + Personal)' ||
+      evaluationAnalysis.riskCategoryClassification.includes('Personal / Wellness') ||
+      evaluationAnalysis.riskCategoryClassification.includes('Personal')
     ) {
       effectiveCategory = evaluationAnalysis.riskCategoryClassification;
     } else {
@@ -320,24 +358,96 @@ function StudentRosterRow({
       rawPlanStatus === 'ACTIVE' ||
       rawPlanStatus === 'ASSIGNED' ||
       rawPlanStatus === 'PENDING' ||
+      rawPlanStatus === 'READY FOR VERIFICATION' ||
       Boolean(acadPlanObj?.plan_title) ||
       Boolean(assignedPlan)
     );
 
   const currentAcadPlanStatus = isCompletedPlan ? 'COMPLETED' : isActivePlan ? 'IN_PROGRESS' : 'NOT_REQUIRED';
-  const currentCounselingStatus = (student.counseling_session?.status || '').toUpperCase();
-  const currentReliefStatus = (student.financial_relief_status || (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')).toUpperCase();
 
-  const hasAcadPlan = isCompletedPlan || isActivePlan || evaluationAnalysis.hasLowAcademicMetrics;
-  const hasCounselor = Boolean(assignedCounselor || evaluationAnalysis.showCounselorBtn);
-  const hasAid = currentReliefStatus !== 'NONE';
+  // 1. Academic Risk & Completion
+  const hasAcademicRisk = Boolean(
+    (cgpaVal !== null && Number(cgpaVal) < 6.0) ||
+    (attendanceVal !== null && Number(attendanceVal) < 75) ||
+    evaluationAnalysis.hasLowAcademicMetrics ||
+    evaluationAnalysis.isAcademicRisk ||
+    evaluationAnalysis.showAcademicPlanBtn ||
+    categoryLower.includes('academic') ||
+    categoryLower.includes('dual') ||
+    (student.primaryRiskCategory || '').toUpperCase() === 'ACADEMIC' ||
+    (student.evaluationCase || '').toUpperCase() === 'CASE_C_PURE_ACADEMIC' ||
+    Boolean(student.assignedAcademicPlan) ||
+    Boolean(student.academicPlan) ||
+    Boolean(acadPlanObj?.plan_title) ||
+    isActivePlan ||
+    isCompletedPlan
+  );
+  const isAcademicDone = !hasAcademicRisk || isCompletedPlan;
 
-  const acadDone = !hasAcadPlan || isCompletedPlan;
-  const counselorDone = !hasCounselor || currentCounselingStatus === 'COMPLETED';
-  const aidDone = !hasAid || currentReliefStatus === 'APPROVED' || currentReliefStatus === 'DISBURSED';
+  // 2. Counseling Risk & Completion
+  const currentCounselingStatus = (
+    student.counseling_session?.status ||
+    student.counselingStatus ||
+    ''
+  ).toUpperCase();
+  const isCounselingResolved =
+    currentCounselingStatus === 'COMPLETED' ||
+    currentCounselingStatus === 'RESOLVED';
+  const hasCounselingRisk = Boolean(
+    assignedCounselor ||
+    evaluationAnalysis.showCounselorBtn ||
+    categoryLower.includes('wellness') ||
+    categoryLower.includes('mental') ||
+    categoryLower.includes('personal') ||
+    categoryLower.includes('dual') ||
+    (student.primaryRiskCategory || '').toUpperCase() === 'WELLNESS' ||
+    (student.primaryRiskCategory || '').toUpperCase() === 'DISENGAGEMENT' ||
+    (student.assignedRole || '').toUpperCase() === 'COUNSELOR' ||
+    student.needsCounseling === true ||
+    student.recommendedActions?.assignCounselor === true ||
+    Boolean(student.counseling_session?.status) ||
+    (student.evaluationCase || '').toUpperCase() === 'CASE_A_WELLNESS_DISENGAGEMENT'
+  );
+  const isCounselingDone = !hasCounselingRisk || isCounselingResolved;
 
-  const hasAnyIntervention = (isCompletedPlan || currentCounselingStatus === 'COMPLETED' || currentReliefStatus === 'APPROVED' || currentReliefStatus === 'DISBURSED');
-  const allInterventionsCompleted = hasAnyIntervention && acadDone && counselorDone && aidDone;
+  // 3. Financial Risk & Completion
+  const aidStatusUpper = String(student.financialAidStatus || student.financial_aid_status || '').toUpperCase();
+  let reliefStatus = String(student.financial_relief_status || student.financial_aid_status || '').toUpperCase();
+  if (aidStatusUpper === 'DISBURSED' || reliefStatus === 'DISBURSED') {
+    reliefStatus = 'DISBURSED';
+  } else if (aidStatusUpper === 'APPROVED' || reliefStatus === 'APPROVED') {
+    reliefStatus = 'APPROVED';
+  } else if (aidStatusUpper === 'REJECTED' || reliefStatus === 'REJECTED') {
+    reliefStatus = 'REJECTED';
+  } else if (
+    aidStatusUpper === 'PENDING' ||
+    reliefStatus === 'PENDING' ||
+    reliefStatus === 'REQUESTED' ||
+    aidStatusUpper === 'REQUESTED' ||
+    aidStatusUpper === 'PENDING INSTITUTIONAL SUPPORT' ||
+    student.collegeFinancialAid?.status === 'Pending Institutional Support'
+  ) {
+    reliefStatus = 'REQUESTED';
+  }
+  const currentReliefStatus = reliefStatus;
+  const isFinancialDisbursed = reliefStatus === 'DISBURSED';
+  const hasFinancialRisk = Boolean(
+    evaluationAnalysis.showFinancialAidOption ||
+    (currentReliefStatus !== 'NONE' && currentReliefStatus !== 'NOT_REQUESTED' && currentReliefStatus !== '') ||
+    student.financialAidStatus === 'Pending Institutional Support' ||
+    (student.collegeFinancialAid?.status && student.collegeFinancialAid?.status !== 'Not Applied') ||
+    categoryLower.includes('financial') ||
+    categoryLower.includes('income') ||
+    (student.primaryRiskCategory || '').toUpperCase() === 'FINANCIAL' ||
+    (student.evaluationCase || '').toUpperCase() === 'CASE_B_FINANCIAL_STRESS'
+  );
+  const isFinancialDone = !hasFinancialRisk || isFinancialDisbursed;
+
+  // Boolean check: Evaluate completion of assigned requirements
+  const hasAnyAssignedNeed = hasAcademicRisk || hasCounselingRisk || hasFinancialRisk;
+  const hasAnyCompleted = isCompletedPlan || isCounselingResolved || isFinancialDisbursed;
+  const isReadyForResurvey = isAcademicDone && isCounselingDone && isFinancialDone && (hasAnyAssignedNeed ? hasAnyCompleted : true);
+  const allInterventionsCompleted = isReadyForResurvey;
 
   let planTitle = 'Academic Support Plan';
   if (typeof assignedPlan === 'string') {
@@ -428,15 +538,39 @@ function StudentRosterRow({
 
       {/* Survey Status */}
       <td className="py-4 px-5">
-        {hasStudentSurvey ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full font-semibold bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
-            <CheckCircle2 size={13} className="text-emerald-400" /> Submitted
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full font-semibold bg-amber-950/60 text-amber-400 border border-amber-500/30">
-            <Clock size={13} /> Pending
-          </span>
-        )}
+        {(() => {
+          const isResubmitted = Boolean(
+            student.survey_resubmitted ||
+            student.resurvey_status === 'RESUBMITTED' ||
+            student.resurvey_status === 'EVALUATED'
+          );
+
+          if (isResubmitted) {
+            return (
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full font-semibold bg-purple-950/70 text-purple-300 border border-purple-500/50 shadow-sm"
+                title="Student re-submitted survey. Fresh survey data submitted."
+              >
+                <CheckCircle2 size={13} className="text-purple-400" />
+                <span>Submitted</span>
+              </span>
+            );
+          }
+
+          if (hasStudentSurvey) {
+            return (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full font-semibold bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
+                <CheckCircle2 size={13} className="text-emerald-400" /> Submitted
+              </span>
+            );
+          }
+
+          return (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full font-semibold bg-amber-950/60 text-amber-400 border border-amber-500/30">
+              <Clock size={13} /> Pending
+            </span>
+          );
+        })()}
       </td>
 
       {/* Risk Evaluation Matrix */}
@@ -719,10 +853,31 @@ function StudentRosterRow({
             {/* 2. Financial Relief Request Module */}
             {(() => {
               const hasFinancialNeed = evaluationAnalysis.showFinancialAidOption;
-              const reliefStatus = (
-                student.financial_relief_status ||
-                (student.financialAidStatus === 'Pending Institutional Support' ? 'REQUESTED' : 'NONE')
-              ).toUpperCase();
+              const aidStatusUpper = String(student.financialAidStatus || student.financial_aid_status || '').toUpperCase();
+              let reliefStatus = String(student.financial_relief_status || student.financial_aid_status || '').toUpperCase();
+
+              // State persistence: Once marked APPROVED or DISBURSED in MongoDB, preserve across all re-evaluations
+              if (aidStatusUpper === 'DISBURSED' || reliefStatus === 'DISBURSED') {
+                reliefStatus = 'DISBURSED';
+              } else if (aidStatusUpper === 'APPROVED' || reliefStatus === 'APPROVED') {
+                reliefStatus = 'APPROVED';
+              } else if (aidStatusUpper === 'REJECTED' || reliefStatus === 'REJECTED') {
+                reliefStatus = 'REJECTED';
+              } else if (
+                aidStatusUpper === 'PENDING' ||
+                reliefStatus === 'PENDING' ||
+                reliefStatus === 'REQUESTED' ||
+                aidStatusUpper === 'REQUESTED' ||
+                aidStatusUpper === 'PENDING INSTITUTIONAL SUPPORT' ||
+                student.collegeFinancialAid?.status === 'Pending Institutional Support'
+              ) {
+                reliefStatus = 'REQUESTED';
+              } else if (reliefStatus === 'DOCUMENTS_REQUIRED' || reliefStatus === 'DOCUMENTS_SUBMITTED') {
+                // preserve documents flow
+              } else {
+                reliefStatus = 'NONE';
+              }
+
               const hasUploadedDocs = Array.isArray(student.financial_documents) && student.financial_documents.length > 0;
 
               if (reliefStatus === 'DISBURSED') {
@@ -741,7 +896,19 @@ function StudentRosterRow({
                   </div>
                 );
               }
-              if (reliefStatus === 'DOCUMENTS_SUBMITTED' || (hasUploadedDocs && (reliefStatus === 'REQUESTED' || reliefStatus === 'DOCUMENTS_REQUIRED'))) {
+              if (reliefStatus === 'REJECTED') {
+                return (
+                  <div
+                    onClick={() => onViewDetails && onViewDetails(student, 'actions')}
+                    className="inline-flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/60 p-1.5 rounded-lg border border-rose-500/40 w-full font-semibold cursor-pointer hover:bg-rose-900/60 transition shadow-sm"
+                    title="Financial Aid Request Rejected by Administration — Click to View Rejection Reason & Re-Appeal"
+                  >
+                    <XCircle size={13} className="text-rose-400 shrink-0" />
+                    <span className="truncate">$ Fund Rejected</span>
+                  </div>
+                );
+              }
+              if (reliefStatus === 'DOCUMENTS_SUBMITTED' || (hasUploadedDocs && reliefStatus === 'DOCUMENTS_REQUIRED')) {
                 return (
                   <div className="inline-flex items-center gap-1.5 text-xs text-blue-300 bg-blue-950/60 p-1.5 rounded-lg border border-blue-500/40 w-full font-semibold">
                     <Clock size={13} className="text-blue-400 shrink-0" />
@@ -753,19 +920,19 @@ function StudentRosterRow({
                 return (
                   <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
                     <Clock size={13} className="text-amber-400 shrink-0" />
-                    <span className="truncate">$ Pending Documents</span>
+                    <span className="truncate">$ Documents Requested</span>
                   </div>
                 );
               }
               if (reliefStatus === 'REQUESTED') {
                 return (
-                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold">
+                  <div className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/60 p-1.5 rounded-lg border border-amber-500/40 w-full font-semibold" title="Pending Aid / Documents Requested">
                     <Clock size={13} className="text-amber-400 shrink-0" />
-                    <span className="truncate">$ Documents Requested</span>
+                    <span className="truncate">$ Pending Aid</span>
                   </div>
                 );
               }
-              if (hasFinancialNeed) {
+              if (hasFinancialNeed && reliefStatus !== 'REJECTED') {
                 return (
                   <button
                     type="button"
@@ -900,25 +1067,62 @@ function StudentRosterRow({
             </button>
 
             {/* RE-SURVEY BUTTON (TEACHER OVERRIDE 14-DAY COOLDOWN) */}
-            {onRequestSurveyResubmission && (
-              <button
-                type="button"
-                onClick={() => onRequestSurveyResubmission(studentDbId, student.name)}
-                className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm shrink-0 whitespace-nowrap ${
-                  allInterventionsCompleted
-                    ? 'bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/60 ring-1 ring-emerald-500/30'
-                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/40'
-                }`}
-                title={
-                  allInterventionsCompleted
-                    ? 'All interventions completed! Click to trigger student re-survey for recovery evaluation.'
-                    : 'Request Student Survey Re-submission (Reset 14-day Cooldown)'
-                }
-              >
-                <RotateCcw size={13} className={allInterventionsCompleted ? 'text-emerald-400 shrink-0' : 'text-amber-400 shrink-0'} />
-                <span>{allInterventionsCompleted ? 'Re-survey (Ready)' : 'Re-survey'}</span>
-              </button>
-            )}
+            {onRequestSurveyResubmission && (() => {
+              const isResubmitted = Boolean(
+                student.survey_resubmitted ||
+                student.resurvey_status === 'RESUBMITTED' ||
+                student.resurvey_status === 'EVALUATED'
+              );
+              const isAuthorized = Boolean(
+                student.survey_cooldown_override ||
+                student.resurvey_status === 'AUTHORIZED'
+              );
+
+              if (isResubmitted) {
+                return (
+                  <span
+                    className="h-8 px-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 bg-purple-950/70 border border-purple-500/50 text-purple-300 shrink-0 whitespace-nowrap shadow-sm select-none"
+                    title="Survey re-submitted by student. Click [ Re-evaluate ] to recalculate risk tier."
+                  >
+                    <CheckCircle2 size={13} className="text-purple-400 shrink-0" />
+                    <span>Survey Re-submitted</span>
+                  </span>
+                );
+              }
+
+              if (isAuthorized) {
+                return (
+                  <span
+                    className="h-8 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-amber-950/60 border border-amber-500/40 text-amber-300 shrink-0 whitespace-nowrap select-none"
+                    title="Teacher authorized re-survey. Waiting for student to retake."
+                  >
+                    <Clock size={13} className="text-amber-400 shrink-0" />
+                    <span>Re-survey Authorized</span>
+                  </span>
+                );
+              }
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => isReadyForResurvey && onRequestSurveyResubmission(studentDbId, student.name)}
+                  disabled={!isReadyForResurvey}
+                  className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                    isReadyForResurvey
+                      ? 'bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/60 ring-1 ring-emerald-500/30 font-semibold cursor-pointer active:scale-95 shadow-sm'
+                      : 'bg-slate-900/50 text-slate-500 border border-slate-800 cursor-not-allowed opacity-50 select-none'
+                  }`}
+                  title={
+                    isReadyForResurvey
+                      ? 'All interventions completed! Click to authorize student re-survey for recovery evaluation.'
+                      : 'Disabled: All assigned interventions (Academic, Counseling, or Financial) must be completed before authorizing re-survey.'
+                  }
+                >
+                  <RotateCcw size={13} className={isReadyForResurvey ? 'text-emerald-400 shrink-0' : 'text-slate-500 shrink-0'} />
+                  <span>{isReadyForResurvey ? 'Re-survey (Ready)' : 'Re-survey'}</span>
+                </button>
+              );
+            })()}
 
             {/* AI EVALUATE BUTTON */}
             <button
