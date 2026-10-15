@@ -395,7 +395,7 @@ export default function LandingPage() {
             </div>
             <h3 className="text-xl font-bold text-white mb-3">AI Risk Diagnostic Engine</h3>
             <p className="text-slate-300 text-sm leading-relaxed mb-6">
-              Synthesizes quantitative metrics (CGPA &lt; 6.0, Attendance &lt; 75%, active backlogs) with student lifestyle disclosures (mental distress, study disengagement, financial stress). Generates transparent, deterministic risk tiers with strict root-cause classification.
+              Synthesizes quantitative metrics (Series Percentage &lt; 55%, Attendance &lt; 75%, active backlogs) with student lifestyle disclosures (mental distress, study disengagement, financial stress). Generates transparent, deterministic risk tiers with strict root-cause classification.
             </p>
             <ul className="space-y-2.5 text-xs text-slate-300">
               <li className="flex items-center gap-2">
@@ -424,7 +424,7 @@ export default function LandingPage() {
             </div>
             <h3 className="text-xl font-bold text-white mb-3">Multi-Tier Intervention Tracking</h3>
             <p className="text-slate-300 text-sm leading-relaxed mb-6">
-              Full lifecycle tracking for academic support plans. Faculty formulate custom remedial roadmaps with target CGPA and attendance milestones. Includes dynamic state pills (Unassigned → In Progress → Completed).
+              Full lifecycle tracking for academic support plans. Faculty formulate custom remedial roadmaps with target series percentage and attendance milestones. Includes dynamic state pills (Unassigned → In Progress → Completed).
             </p>
             <ul className="space-y-2.5 text-xs text-slate-300">
               <li className="flex items-center gap-2">
@@ -513,8 +513,6 @@ export default function LandingPage() {
             <span className="font-bold text-white tracking-wide">
               EduRisk Intelligence System
             </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400">MERN Stack Edition</span>
           </div>
 
           <div className="flex items-center gap-6">
