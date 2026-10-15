@@ -20,7 +20,7 @@ const app = express();
 
 // Middleware
 app.use(cors({ 
-  origin: ['http://localhost:5173', 'http://localhost:5000'], // Match Vite/React dev ports
+  origin: ['http://localhost:5173', 'http://localhost:5000', 'https://student-dropout-risk-prediction-sys-puce.vercel.app'], // Match Vite/React dev ports
   credentials: true 
 }));
 app.use(express.json({ limit: '10mb' }));
