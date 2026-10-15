@@ -66,7 +66,7 @@ export default function AcademicPlanModal({ student, isOpen, onClose, onSubmitPl
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <p className="text-xs text-slate-400">
-            Select an academic intervention track based on CGPA ({student.cgpa ?? 'N/A'}) and Attendance ({student.attendancePercentage ?? student.attendance ?? 'N/A'}%).
+            Select an academic intervention track based on Series Marks ({student.seriesMarks?.percentage ?? student.seriesMarksPercentage ?? (student.cgpa !== null && student.cgpa !== undefined ? `${student.cgpa * 10}%` : 'N/A')}) and Monthly Attendance ({student.monthlyAttendance ?? student.attendancePercentage ?? student.attendance ?? 'N/A'}%).
           </p>
 
           {/* Options */}

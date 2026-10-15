@@ -204,9 +204,22 @@ function resolveStudentFields(student) {
   const cgpaVal = student.cgpa !== null && student.cgpa !== undefined ? student.cgpa : null;
   const attendanceVal = student.attendancePercentage ?? student.attendance ?? null;
 
+  const resolvedSeriesMarks = student.seriesMarksPercentage !== undefined && student.seriesMarksPercentage !== null
+    ? student.seriesMarksPercentage
+    : (student.seriesMarks?.percentage !== undefined && student.seriesMarks?.percentage !== null
+        ? student.seriesMarks.percentage
+        : (cgpaVal !== null ? (cgpaVal > 10 ? cgpaVal : Number((cgpaVal * 10).toFixed(1))) : null));
+
+  const resolvedMonthlyAttendance = student.monthlyAttendance !== undefined && student.monthlyAttendance !== null
+    ? student.monthlyAttendance
+    : attendanceVal;
+
+  const seriesMarksPercentage = resolvedSeriesMarks;
+  const monthlyAttendance = resolvedMonthlyAttendance;
+
   const marks_submitted = student.marks_submitted !== undefined
     ? Boolean(student.marks_submitted)
-    : (cgpaVal !== null && attendanceVal !== null);
+    : ((seriesMarksPercentage !== null && monthlyAttendance !== null) || (cgpaVal !== null && attendanceVal !== null));
 
   const survey_submitted = student.survey_submitted !== undefined
     ? Boolean(student.survey_submitted)
@@ -267,6 +280,8 @@ function resolveStudentFields(student) {
     studentDbId,
     displayStudentId,
     displayYear,
+    seriesMarksPercentage,
+    monthlyAttendance,
     cgpaVal,
     attendanceVal,
     marks_submitted,
@@ -319,6 +334,8 @@ function StudentRosterRow({
     studentDbId,
     displayStudentId,
     displayYear,
+    seriesMarksPercentage,
+    monthlyAttendance,
     cgpaVal,
     attendanceVal,
     hasTeacherData,
@@ -460,7 +477,7 @@ function StudentRosterRow({
     if (canEvaluate) return 'Click to trigger AI Risk Analysis';
     if (!hasTeacherData && !hasStudentSurvey)
       return 'Disabled: Missing Teacher Marks & Student Survey';
-    if (!hasTeacherData) return 'Disabled: Missing CGPA & Attendance from Teacher';
+    if (!hasTeacherData) return 'Disabled: Missing Series Marks & Monthly Attendance from Teacher';
     return 'Disabled: Waiting for Student Survey Submission';
   };
 
@@ -516,20 +533,20 @@ function StudentRosterRow({
         <div className="text-xs text-indigo-400 font-semibold">{displayYear}</div>
       </td>
 
-      {/* CGPA / Attendance */}
+      {/* Series Marks / Monthly Attendance */}
       <td className="py-4 px-5">
         <div className="text-xs text-slate-300">
-          <span className="text-slate-400">CGPA:</span>{' '}
-          {cgpaVal !== null ? (
-            <span className="font-bold text-white">{cgpaVal}</span>
+          <span className="text-slate-400">Series Marks:</span>{' '}
+          {seriesMarksPercentage !== null && seriesMarksPercentage !== undefined ? (
+            <span className="font-bold text-white">{seriesMarksPercentage}%</span>
           ) : (
             <span className="text-amber-400 font-medium">Missing</span>
           )}
         </div>
         <div className="text-xs text-slate-300">
-          <span className="text-slate-400">Attendance:</span>{' '}
-          {attendanceVal !== null ? (
-            <span className="font-bold text-white">{attendanceVal}%</span>
+          <span className="text-slate-400">Monthly Attendance:</span>{' '}
+          {monthlyAttendance !== null && monthlyAttendance !== undefined ? (
+            <span className="font-bold text-white">{monthlyAttendance}%</span>
           ) : (
             <span className="text-amber-400 font-medium">Missing</span>
           )}
@@ -1186,7 +1203,7 @@ export default function StudentRosterTable({
             <tr className="border-b border-slate-800/80 bg-[#080c14] text-slate-400 text-[11px] font-semibold uppercase tracking-wider select-none">
               <th className="py-4 px-5 min-w-[180px]">Student</th>
               <th className="py-4 px-5 min-w-[100px]">ID / Year</th>
-              <th className="py-4 px-5 min-w-[130px]">CGPA / Attendance</th>
+              <th className="py-4 px-5 min-w-[170px]">SERIES MARKS / MONTHLY ATTENDANCE</th>
               <th className="py-4 px-5 min-w-[110px]">Survey Status</th>
               <th className="py-4 px-5 min-w-[150px]">Risk Evaluation</th>
               <th className="py-4 px-5 min-w-[220px]">{showActions ? 'Recommended Intervention' : 'Actions Logged'}</th>

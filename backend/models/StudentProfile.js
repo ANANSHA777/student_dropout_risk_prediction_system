@@ -25,6 +25,20 @@ const studentProfileSchema = new mongoose.Schema(
       enum: ['1st Year', '2nd Year', '3rd Year', '4th Year'],
       default: '1st Year',
     },
+    seriesMarks: {
+      percentage: {
+        type: Number,
+        min: 0,
+        max: 100,
+        default: 0,
+      },
+    },
+    monthlyAttendance: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
     cgpa: {
       type: Number,
       default: null,

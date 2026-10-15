@@ -92,6 +92,8 @@ export function StudentDetailsModal({
 
   const cgpa = student.cgpa !== null && student.cgpa !== undefined ? student.cgpa : 'N/A';
   const attendance = student.attendancePercentage ?? student.attendance ?? 'N/A';
+  const seriesMarks = student.seriesMarksPercentage ?? student.seriesMarks?.percentage ?? (cgpa !== 'N/A' ? (Number(cgpa) > 10 ? cgpa : Number((Number(cgpa) * 10).toFixed(1))) : 'N/A');
+  const monthlyAttendance = student.monthlyAttendance ?? attendance;
   const backlogs = student.activeBacklogs || survey.activeBacklogs || '0 Backlogs';
   const rawMentalHealth = student.mentalHealthSelfReport || student.mentalHealthState || survey.mentalHealthState || 'Good / Balanced';
   const hasMentalHealthFlag = ['depressed', 'overwhelmed', 'poor', 'anxious', 'sad', 'struggling', 'bad', 'low', 'severe', 'critical'].some(
@@ -506,15 +508,15 @@ export function StudentDetailsModal({
 
                   <div className="grid grid-cols-3 gap-3 text-xs">
                     <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                      <span className="text-slate-500 block text-[11px]">Cumulative CGPA</span>
-                      <span className="text-base font-bold text-white">{cgpa}</span>
-                      <span className="text-[10px] text-slate-400 block mt-0.5">Scale: 0.0 - 10.0</span>
+                      <span className="text-slate-500 block text-[11px]">Series Marks</span>
+                      <span className="text-base font-bold text-white">{seriesMarks !== 'N/A' ? `${seriesMarks}%` : 'N/A'}</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">Scale: 0 - 100%</span>
                     </div>
                     <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                      <span className="text-slate-500 block text-[11px]">Class Attendance</span>
-                      <span className="text-base font-bold text-white">{attendance}%</span>
+                      <span className="text-slate-500 block text-[11px]">Monthly Attendance</span>
+                      <span className="text-base font-bold text-white">{monthlyAttendance !== 'N/A' ? `${monthlyAttendance}%` : 'N/A'}</span>
                       <span className="text-[10px] text-slate-400 block mt-0.5">
-                        {Number(attendance) >= 75 ? 'Meets threshold (≥75%)' : 'Below threshold (<75%)'}
+                        {monthlyAttendance !== 'N/A' && Number(monthlyAttendance) >= 75 ? 'Meets threshold (≥75%)' : 'Below threshold (<75%)'}
                       </span>
                     </div>
                     <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">

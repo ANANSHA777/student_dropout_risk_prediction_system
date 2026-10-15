@@ -51,6 +51,20 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ['1st Year', '2nd Year', '3rd Year', '4th Year'],
     },
+    seriesMarks: {
+      percentage: {
+        type: Number,
+        min: 0,
+        max: 100,
+        default: 0,
+      },
+    },
+    monthlyAttendance: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
     cgpa: {
       type: Number,
       default: null,
@@ -166,6 +180,8 @@ userSchema.pre('save', async function () {
   if (this.role !== 'Student') {
     this.studentId = undefined;
     this.yearOfStudy = undefined;
+    this.seriesMarks = undefined;
+    this.monthlyAttendance = undefined;
     this.cgpa = undefined;
     this.attendance = undefined;
     this.surveyCompleted = undefined;
@@ -184,6 +200,8 @@ userSchema.pre('save', async function () {
     if (this.surveyCompleted === undefined) this.surveyCompleted = false;
     if (!this.yearOfStudy) this.yearOfStudy = '1st Year';
     if (this.studentId === undefined) this.studentId = '';
+    if (!this.seriesMarks) this.seriesMarks = { percentage: 0 };
+    if (this.monthlyAttendance === undefined) this.monthlyAttendance = 0;
   }
 
   // 2. Password Hashing Guard

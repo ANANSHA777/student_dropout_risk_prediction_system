@@ -3,14 +3,16 @@ import React, { useState, useEffect } from 'react';
 import { X, BookOpen, Award, Percent } from 'lucide-react';
 
 export default function RecordEntryModal({ isOpen, student, onClose, onSave }) {
-  const [cgpa, setCgpa] = useState('');
-  const [attendance, setAttendance] = useState('');
+  const [seriesMarksPercentage, setSeriesMarksPercentage] = useState('');
+  const [monthlyAttendance, setMonthlyAttendance] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (student) {
-      setCgpa(student.cgpa !== null && student.cgpa !== undefined ? student.cgpa : '');
-      setAttendance(student.attendancePercentage ?? student.attendance ?? '');
+      const marksVal = student.seriesMarksPercentage ?? student.seriesMarks?.percentage ?? (student.cgpa !== null && student.cgpa !== undefined ? (student.cgpa > 10 ? student.cgpa : Number((student.cgpa * 10).toFixed(1))) : '');
+      const attVal = student.monthlyAttendance ?? student.attendancePercentage ?? student.attendance ?? '';
+      setSeriesMarksPercentage(marksVal !== null && marksVal !== undefined ? marksVal : '');
+      setMonthlyAttendance(attVal !== null && attVal !== undefined ? attVal : '');
     }
   }, [student, isOpen]);
 
@@ -22,11 +24,14 @@ export default function RecordEntryModal({ isOpen, student, onClose, onSave }) {
 
     try {
       const studentDbId = student._id || student.id;
-      const parsedCgpa = cgpa !== '' ? parseFloat(cgpa) : null;
-      const parsedAttendance = attendance !== '' ? parseFloat(attendance) : null;
+      const parsedMarks = seriesMarksPercentage !== '' ? parseFloat(seriesMarksPercentage) : null;
+      const parsedAttendance = monthlyAttendance !== '' ? parseFloat(monthlyAttendance) : null;
 
       await onSave(studentDbId, {
-        cgpa: parsedCgpa,
+        studentId: studentDbId,
+        seriesMarksPercentage: parsedMarks,
+        monthlyAttendance: parsedAttendance,
+        cgpa: parsedMarks !== null ? parsedMarks / 10 : null,
         attendance: parsedAttendance,
       });
 
@@ -60,26 +65,27 @@ export default function RecordEntryModal({ isOpen, student, onClose, onSave }) {
           </button>
         </div>
 
-        {/* Form: ONLY CGPA and Attendance */}
+        {/* Form: Series Marks & Monthly Attendance */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-4">
             
-            {/* CGPA Input */}
+            {/* Series Marks Input */}
             <div>
               <label className="text-xs uppercase font-semibold text-slate-400 block mb-1">
-                CGPA (0.00 - 10.00)
+                Series Marks (%)
               </label>
               <div className="relative">
                 <Award size={16} className="absolute left-3 top-3 text-slate-500" />
                 <input
                   type="number"
-                  step="0.01"
+                  name="seriesMarksPercentage"
+                  step="0.1"
                   min="0"
-                  max="10"
+                  max="100"
                   required
-                  placeholder="e.g. 8.5"
-                  value={cgpa}
-                  onChange={(e) => setCgpa(e.target.value)}
+                  placeholder="e.g. 78.5"
+                  value={seriesMarksPercentage}
+                  onChange={(e) => setSeriesMarksPercentage(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -88,19 +94,19 @@ export default function RecordEntryModal({ isOpen, student, onClose, onSave }) {
             {/* Attendance Input */}
             <div>
               <label className="text-xs uppercase font-semibold text-slate-400 block mb-1">
-                Attendance (%)
+                MONTHLY ATTENDANCE (%)
               </label>
               <div className="relative">
                 <Percent size={16} className="absolute left-3 top-3 text-slate-500" />
                 <input
                   type="number"
-                  step="0.1"
+                  name="monthlyAttendance"
                   min="0"
                   max="100"
                   required
-                  placeholder="e.g. 87"
-                  value={attendance}
-                  onChange={(e) => setAttendance(e.target.value)}
+                  placeholder="% 77"
+                  value={monthlyAttendance}
+                  onChange={(e) => setMonthlyAttendance(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
               </div>

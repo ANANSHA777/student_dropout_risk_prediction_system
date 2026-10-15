@@ -30,6 +30,8 @@ router.get('/students', getTeacherStudents);
 router.post('/students', createStudent);
 router.put('/students/:id/marks', updateStudentMarks);
 router.post('/students/:id/marks', updateStudentMarks);
+router.post('/students/marks', updateStudentMarks);
+router.put('/students/marks', updateStudentMarks);
 router.delete('/students/:id', deleteStudent);
 
 // ==========================================

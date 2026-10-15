@@ -138,7 +138,7 @@ export default function CounselorAssignmentModal({ student, isOpen, onClose, onA
           <div className="grid grid-cols-2 gap-2 text-slate-300">
             <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
               <span className="text-slate-500 block text-[10px]">Academic Standing:</span>
-              CGPA: <strong className="text-white">{student.cgpa ?? 'N/A'}</strong> | Attendance: <strong className="text-white">{student.attendancePercentage ?? student.attendance ?? 'N/A'}%</strong>
+              Series Marks: <strong className="text-white">{student.seriesMarks?.percentage ?? student.seriesMarksPercentage ?? (student.cgpa !== null && student.cgpa !== undefined ? `${student.cgpa * 10}%` : 'N/A')}</strong> | Monthly Attendance: <strong className="text-white">{student.monthlyAttendance ?? student.attendancePercentage ?? student.attendance ?? 'N/A'}%</strong>
             </div>
             <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
               <span className="text-slate-500 block text-[10px]">Mental Wellness:</span>

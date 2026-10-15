@@ -344,16 +344,20 @@ export default function StudentDashboard() {
           <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center gap-4">
             <Calendar className="text-indigo-400" size={32} />
             <div>
-              <div className="text-xs text-slate-400 font-medium">Attendance</div>
-              <div className="text-2xl font-bold">{profile.attendancePercentage ?? 0}%</div>
+              <div className="text-xs text-slate-400 font-medium">Monthly Attendance</div>
+              <div className="text-2xl font-bold">
+                {profile.monthlyAttendance ?? profile.attendancePercentage ?? profile.attendance ?? 0}%
+              </div>
             </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex items-center gap-4">
             <BookOpen className="text-indigo-400" size={32} />
             <div>
-              <div className="text-xs text-slate-400 font-medium">Latest Grade Average</div>
-              <div className="text-2xl font-bold">{profile.cgpa ? (profile.cgpa * 10).toFixed(0) : 0}%</div>
+              <div className="text-xs text-slate-400 font-medium">Series Marks</div>
+              <div className="text-2xl font-bold">
+                {profile.seriesMarks?.percentage ?? profile.seriesMarksPercentage ?? (profile.cgpa ? (profile.cgpa > 10 ? profile.cgpa : Number((profile.cgpa * 10).toFixed(0))) : 0)}%
+              </div>
             </div>
           </div>
 
@@ -517,25 +521,25 @@ export default function StudentDashboard() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div className="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between">
                           <div>
-                            <div className="text-[11px] text-slate-400">Target CGPA</div>
-                            <div className="text-sm font-bold text-emerald-400 mt-0.5">≥ 6.0</div>
+                            <div className="text-[11px] text-slate-400">Target Series Marks</div>
+                            <div className="text-sm font-bold text-emerald-400 mt-0.5">≥ 60%</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-[11px] text-slate-500">Current CGPA</div>
-                            <div className={`text-sm font-bold ${Number(profile.cgpa) < 6.0 ? 'text-amber-400' : 'text-slate-200'}`}>
-                              {profile.cgpa !== null && profile.cgpa !== undefined ? profile.cgpa : 'N/A'}
+                            <div className="text-[11px] text-slate-500">Current Series Marks</div>
+                            <div className={`text-sm font-bold ${Number(profile.seriesMarks?.percentage ?? profile.seriesMarksPercentage ?? (profile.cgpa ? profile.cgpa * 10 : 0)) < 60 ? 'text-amber-400' : 'text-slate-200'}`}>
+                              {profile.seriesMarks?.percentage ?? profile.seriesMarksPercentage ?? (profile.cgpa !== null && profile.cgpa !== undefined ? `${profile.cgpa * 10}%` : 'N/A')}
                             </div>
                           </div>
                         </div>
                         <div className="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between">
                           <div>
-                            <div className="text-[11px] text-slate-400">Target Attendance</div>
+                            <div className="text-[11px] text-slate-400">Target Monthly Attendance</div>
                             <div className="text-sm font-bold text-emerald-400 mt-0.5">≥ 75%</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-[11px] text-slate-500">Current Attendance</div>
-                            <div className={`text-sm font-bold ${Number(profile.attendancePercentage ?? profile.attendance ?? 0) < 75 ? 'text-amber-400' : 'text-slate-200'}`}>
-                              {profile.attendancePercentage ?? profile.attendance ?? 0}%
+                            <div className="text-[11px] text-slate-500">Current Monthly Attendance</div>
+                            <div className={`text-sm font-bold ${Number(profile.monthlyAttendance ?? profile.attendancePercentage ?? profile.attendance ?? 0) < 75 ? 'text-amber-400' : 'text-slate-200'}`}>
+                              {profile.monthlyAttendance ?? profile.attendancePercentage ?? profile.attendance ?? 0}%
                             </div>
                           </div>
                         </div>

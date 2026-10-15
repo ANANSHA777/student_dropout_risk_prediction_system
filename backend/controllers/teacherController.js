@@ -108,14 +108,26 @@ exports.getTeacherStudents = async (req, res) => {
     const combinedStudents = users.map((user) => {
       const profile = profileMap.get(user._id.toString()) || {};
 
-      const resolvedCgpa = profile.cgpa ?? user.cgpa ?? null;
-      const resolvedAttendance = profile.attendancePercentage ?? profile.attendance ?? user.attendance ?? null;
+      const resolvedSeriesMarks = profile.seriesMarks?.percentage !== undefined && profile.seriesMarks?.percentage !== null
+        ? profile.seriesMarks.percentage
+        : (user.seriesMarks?.percentage !== undefined && user.seriesMarks?.percentage !== null
+            ? user.seriesMarks.percentage
+            : (profile.cgpa !== null && profile.cgpa !== undefined ? (profile.cgpa > 10 ? profile.cgpa : Number((profile.cgpa * 10).toFixed(1))) : (user.cgpa !== null && user.cgpa !== undefined ? (user.cgpa > 10 ? user.cgpa : Number((user.cgpa * 10).toFixed(1))) : null)));
+
+      const resolvedMonthlyAttendance = profile.monthlyAttendance !== undefined && profile.monthlyAttendance !== null
+        ? profile.monthlyAttendance
+        : (user.monthlyAttendance !== undefined && user.monthlyAttendance !== null
+            ? user.monthlyAttendance
+            : (profile.attendancePercentage ?? profile.attendance ?? user.attendance ?? null));
+
+      const resolvedCgpa = profile.cgpa ?? user.cgpa ?? (resolvedSeriesMarks !== null ? resolvedSeriesMarks / 10 : null);
+      const resolvedAttendance = resolvedMonthlyAttendance;
       const isSurveyDone = Boolean(profile.surveyCompleted || user.surveyCompleted);
 
-      const marks_submitted = resolvedCgpa !== null && resolvedAttendance !== null;
+      const marks_submitted = resolvedSeriesMarks !== null && resolvedMonthlyAttendance !== null;
       const survey_submitted = isSurveyDone;
 
-      // Evaluation button is enabled ONLY when CGPA, Attendance, AND Survey are present
+      // Evaluation button is enabled ONLY when Series Marks, Attendance, AND Survey are present
       const canEvaluate = marks_submitted && survey_submitted;
 
       return {
@@ -125,6 +137,9 @@ exports.getTeacherStudents = async (req, res) => {
         studentId: profile.studentId || user.studentId || '',
         department: profile.department || user.department || 'Computer Science',
         yearOfStudy: profile.yearOfStudy || user.yearOfStudy || '1st Year',
+        seriesMarks: { percentage: resolvedSeriesMarks ?? 0 },
+        seriesMarksPercentage: resolvedSeriesMarks,
+        monthlyAttendance: resolvedMonthlyAttendance,
         cgpa: resolvedCgpa,
         attendance: resolvedAttendance,
         attendancePercentage: resolvedAttendance,
@@ -204,50 +219,69 @@ exports.getTeacherStudents = async (req, res) => {
   }
 };
 
-// @desc    Update ONLY student CGPA and attendance (Without altering Risk Level)
+// @desc    Update ONLY student Series Marks Percentage and Monthly Attendance (Without altering Risk Level)
 // @route   POST /api/teacher/students/:id/marks
 // @access  Private (Teacher, Admin)
 exports.updateStudentMarks = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { cgpa, marks, attendance, attendancePercentage, teacherNotes } = req.body;
+    const studentId = req.body.studentId || req.params.id;
+    const { seriesMarksPercentage, monthlyAttendance, cgpa, marks, attendance, attendancePercentage, teacherNotes } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid Student User ID' });
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'Student ID is required' });
     }
 
-    // 1. Check Student User existence
-    const user = await User.findById(id);
+    // 1. Check Student User existence (supports ObjectId or studentId string)
+    let user = null;
+    if (mongoose.Types.ObjectId.isValid(studentId)) {
+      user = await User.findById(studentId);
+    }
     if (!user) {
-      return res.status(404).json({ success: false, message: 'Student user not found' });
+      user = await User.findOne({ studentId });
     }
 
-    // 2. Parse CGPA & Attendance values
-    let valCgpa = null;
-    if (cgpa !== undefined && cgpa !== null && cgpa !== '') {
-      valCgpa = Number(cgpa);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    // 2. Parse seriesMarksPercentage & monthlyAttendance values
+    let valMarks = null;
+    if (seriesMarksPercentage !== undefined && seriesMarksPercentage !== null && seriesMarksPercentage !== '') {
+      valMarks = Math.min(100, Math.max(0, Number(seriesMarksPercentage)));
     } else if (marks !== undefined && marks !== null && marks !== '') {
-      const numMarks = Number(marks);
-      valCgpa = numMarks > 10 ? Math.min(10, Math.max(0, (numMarks / 100) * 10)) : numMarks;
+      valMarks = Math.min(100, Math.max(0, Number(marks)));
+    } else if (cgpa !== undefined && cgpa !== null && cgpa !== '') {
+      const numCgpa = Number(cgpa);
+      valMarks = numCgpa > 10 ? Math.min(100, Math.max(0, numCgpa)) : Math.min(100, Math.max(0, numCgpa * 10));
     }
 
     let valAttendance = null;
-    const rawAttendance = attendancePercentage ?? attendance;
+    const rawAttendance = monthlyAttendance ?? attendancePercentage ?? attendance;
     if (rawAttendance !== undefined && rawAttendance !== null && rawAttendance !== '') {
-      valAttendance = Number(rawAttendance);
+      valAttendance = Math.min(100, Math.max(0, Number(rawAttendance)));
     }
 
     // 3. Save directly to User Document
-    if (valCgpa !== null && !isNaN(valCgpa)) user.cgpa = valCgpa;
-    if (valAttendance !== null && !isNaN(valAttendance)) user.attendance = valAttendance;
+    if (valMarks !== null && !isNaN(valMarks)) {
+      user.seriesMarks = { percentage: Number(valMarks) };
+      user.cgpa = Number((valMarks / 10).toFixed(2));
+    }
+    if (valAttendance !== null && !isNaN(valAttendance)) {
+      user.monthlyAttendance = Number(valAttendance);
+      user.attendance = Number(valAttendance);
+    }
     await user.save();
 
     // 4. Update or Upsert StudentProfile Document
     const updatePayload = {};
-    if (valCgpa !== null && !isNaN(valCgpa)) updatePayload.cgpa = valCgpa;
+    if (valMarks !== null && !isNaN(valMarks)) {
+      updatePayload.seriesMarks = { percentage: Number(valMarks) };
+      updatePayload.cgpa = Number((valMarks / 10).toFixed(2));
+    }
     if (valAttendance !== null && !isNaN(valAttendance)) {
-      updatePayload.attendancePercentage = valAttendance;
-      updatePayload.attendance = valAttendance;
+      updatePayload.monthlyAttendance = Number(valAttendance);
+      updatePayload.attendancePercentage = Number(valAttendance);
+      updatePayload.attendance = Number(valAttendance);
     }
 
     const pushPayload = {};
@@ -273,15 +307,24 @@ exports.updateStudentMarks = async (req, res) => {
 
     // Compute readiness status
     const isSurveyDone = Boolean(profile.surveyCompleted || user.surveyCompleted);
-    const canEvaluate = profile.cgpa !== null && profile.attendancePercentage !== null && isSurveyDone;
+    const marksSubmitted = (profile.seriesMarks?.percentage !== null && profile.seriesMarks?.percentage !== undefined) || (profile.cgpa !== null && profile.cgpa !== undefined);
+    const attendanceSubmitted = (profile.monthlyAttendance !== null && profile.monthlyAttendance !== undefined) || (profile.attendancePercentage !== null && profile.attendancePercentage !== undefined);
+    const canEvaluate = marksSubmitted && attendanceSubmitted && isSurveyDone;
 
     return res.status(200).json({
       success: true,
-      message: 'Student academic record updated successfully',
+      message: 'Student marks updated successfully',
       student: {
         _id: user._id,
+        id: user._id,
+        studentId: profile.studentId || user.studentId,
+        seriesMarks: user.seriesMarks,
+        seriesMarksPercentage: user.seriesMarks?.percentage,
+        monthlyAttendance: user.monthlyAttendance,
         cgpa: profile.cgpa,
         attendance: profile.attendancePercentage,
+        attendancePercentage: profile.attendancePercentage,
+        marks_submitted: marksSubmitted && attendanceSubmitted,
         canEvaluate,
         riskLevel: profile.riskLevel || user.riskLevel || null,
       },
