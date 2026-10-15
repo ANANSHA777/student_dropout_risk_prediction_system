@@ -1,13 +1,13 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://student-dropout-risk-prediction-system.onrender.com/api";
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://student-dropout-risk-prediction-system.onrender.com/api',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
 
 // Request Interceptor: Attach JWT token if available
 API.interceptors.request.use(
